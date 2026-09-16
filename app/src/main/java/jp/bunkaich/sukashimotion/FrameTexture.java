@@ -24,15 +24,27 @@ final class FrameTexture {
     /** Opaque temporary destination made only from the current app. Replace with a real
      * destination capture before handoff. Never use another app or a wallpaper as filler. */
     FrameTexture transfer(boolean sourceInner,int width,int height){
+        return transfer(sourceInner,width,height,false);
+    }
+    FrameTexture transfer(boolean sourceInner,int width,int height,boolean leftPane){
         if(!prepared)throw new IllegalStateException("Frost textures are not ready");
-        Bitmap mapped=map(sharp,sourceInner,width,height);Bitmap[] blurred=new Bitmap[levels.length];
+        Bitmap mapped=map(sharp,sourceInner,width,height,leftPane);Bitmap[] blurred=new Bitmap[levels.length];
         float scale=levels[0].getHeight()/(float)sharp.getHeight();
-        for(int i=0;i<levels.length;i++)blurred[i]=map(levels[i],sourceInner,Math.max(1,Math.round(width*scale)),Math.max(1,Math.round(height*scale)));
+        for(int i=0;i<levels.length;i++)blurred[i]=map(levels[i],sourceInner,Math.max(1,Math.round(width*scale)),Math.max(1,Math.round(height*scale)),leftPane);
         return new FrameTexture(mapped,blurred,true);
     }
-    private static Bitmap map(Bitmap input,boolean sourceInner,int w,int h){
+    private static Bitmap map(Bitmap input,boolean sourceInner,int w,int h,boolean leftPane){
         Bitmap result=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(result);Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG);
-        if(sourceInner)canvas.drawBitmap(input,new Rect(input.getWidth()/2,0,input.getWidth(),input.getHeight()),new Rect(0,0,w,h),paint);
+        int left=leftPane?0:input.getWidth()/2;
+        if(sourceInner&&leftPane){
+            // Center-crop the moving pane with one scale: text and circles keep
+            // their proportions, and the cover never needs empty border pixels.
+            float scale=Math.max(w/(input.getWidth()*.5f),h/(float)input.getHeight());
+            Matrix matrix=new Matrix();matrix.setScale(scale,scale);
+            matrix.postTranslate(w*.5f-input.getWidth()*.25f*scale,h*.5f-input.getHeight()*.5f*scale);
+            canvas.drawBitmap(input,matrix,paint);
+        }
+        else if(sourceInner)canvas.drawBitmap(input,new Rect(left,0,left+input.getWidth()/2,input.getHeight()),new Rect(0,0,w,h),paint);
         else{canvas.drawBitmap(input,null,new Rect(0,0,w/2,h),paint);canvas.drawBitmap(input,null,new Rect(w/2,0,w,h),paint);}
         result.prepareToDraw();return result;
     }

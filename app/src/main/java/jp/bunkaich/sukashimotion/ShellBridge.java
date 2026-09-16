@@ -10,18 +10,23 @@ import java.io.*;
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.regex.*;
 
 /** Shizuku UserService: shell authority stays in this process, not in the UI. */
 public final class ShellBridge extends IShellBridge.Stub {
     private final ScheduledExecutorService life=Executors.newSingleThreadScheduledExecutor();
+    private final ExecutorService launchJobs=Executors.newSingleThreadExecutor();
+    private SecondaryLaunchListener launchListener;
+    private int launchGeneration,launchRecoveries;private String launchRecoveryError="";
     private final HandlerThread sensorThread=new HandlerThread("motion-sensors");
     private final List<SensorEventListener> listeners=new ArrayList<>();
     private final List<Bundle> sensors=new ArrayList<>();
     private Context context; private SensorManager sensorManager; private int appUid=-1;
     private volatile long heartbeat=SystemClock.elapsedRealtime();
     private volatile IAngleSink sink; private volatile java.lang.Process logReader; private volatile int angleGeneration;
+    private volatile long hardwareEvents, hardwareAt;
+    private volatile float hardwareAngle = Float.NaN;
     private String error=""; private DualDisplayControl displayControl;private TaskDisplayRouter taskRouter;private StatusBarControl bars;
+    private WorkspaceMirror mirror;
     public ShellBridge() { this(null); }
     public ShellBridge(Context ignored) {
         try {
@@ -51,10 +56,14 @@ public final class ShellBridge extends IShellBridge.Stub {
         try {
             Bundle b=new Bundle();b.putInt("uid",android.os.Process.myUid());b.putString("model",Build.MODEL);
             b.putString("error",error);b.putBoolean("running",sink!=null);
+            b.putLong("hardwareAngleEvents",hardwareEvents);b.putFloat("hardwareAngle",hardwareAngle);
+            b.putLong("hardwareAngleAgeMs",hardwareAt==0?-1:SystemClock.elapsedRealtime()-hardwareAt);
             b.putBoolean("statusIconsHidden",bars!=null&&bars.hidden());
+            synchronized(this){b.putBoolean("mirrorActive",mirror!=null&&mirror.active());b.putString("mirrorError",mirror==null?"":mirror.error());}
+            synchronized(this){b.putBoolean("routingInnerLaunches",launchListener!=null);b.putInt("launchRecoveries",launchRecoveries);b.putString("launchRecoveryError",launchRecoveryError);}
             b.putBoolean("samsungPermission",context!=null&&context.checkSelfPermission("com.samsung.permission.SSENSOR")==android.content.pm.PackageManager.PERMISSION_GRANTED);
             synchronized(sensors){ArrayList<Bundle> copy=new ArrayList<>();for(Bundle row:sensors)copy.add(new Bundle(row));b.putParcelableArrayList("sensors",copy);}
-            try { b.putString("display",control().describe()); } catch(Exception e){b.putString("display",message(e));}
+            try { b.putString("display",control().describe());b.putString("baseState",control().baseName());b.putBoolean("powerLocked",control().isPowerPinned()); } catch(Exception e){b.putString("display",message(e));}
             return b;
         } finally { Binder.restoreCallingIdentity(token); }
     }
@@ -97,18 +106,26 @@ public final class ShellBridge extends IShellBridge.Stub {
     }
     private void startLogReader(int generation){
         new Thread(()->{
-            long started=System.currentTimeMillis();
-            Pattern pattern=Pattern.compile("^\\s*([0-9.]+)\\s+\\d+\\s+\\d+\\s+I\\s+SprWallpaper\\|FoldInteractive:\\s+onCommand: action\\[jp\\.bunkaich\\.sukashimotion\\.READ_ANGLE\\], mCurrentAngle\\[([0-9.]+)\\], isVisible\\[true\\]");
+            long started=System.currentTimeMillis(), startedElapsed=SystemClock.elapsedRealtime();
+            WallpaperAngle angleReader=new WallpaperAngle(BuildConfig.APPLICATION_ID+".READ_ANGLE");
             java.lang.Process process=null;
             try{
-                process=new ProcessBuilder("logcat","-v","epoch","-T","1","-s","SprWallpaper|FoldInteractive:I","*:S").redirectErrorStream(true).start();
+                process=new ProcessBuilder("logcat","-v","epoch","-T","1","-s","SprWallpaper|FoldInteractive:I","sensors-hal:I","*:S").redirectErrorStream(true).start();
                 synchronized(this){if(generation!=angleGeneration){process.destroy();return;}logReader=process;}
                 try(BufferedReader reader=new BufferedReader(new InputStreamReader(process.getInputStream()))){
                     String line;while(generation==angleGeneration&&(line=reader.readLine())!=null){
-                        Matcher m=pattern.matcher(line);if(!m.find())continue;
-                        long wallTime=(long)(Double.parseDouble(m.group(1))*1000),age=System.currentTimeMillis()-wallTime;
+                        HardwareAngle.Sample hardware=HardwareAngle.parse(line);
+                        if(hardware!=null){
+                            long age=SystemClock.elapsedRealtime()-hardware.measuredAt();
+                            if(hardware.measuredAt()<startedElapsed||age< -50||age>600)continue;
+                            hardwareEvents++;hardwareAngle=hardware.angle();hardwareAt=hardware.measuredAt();
+                            emit(hardware.angle(),Math.min(SystemClock.elapsedRealtime(),hardware.measuredAt()),HardwareAngle.SOURCE,generation);
+                            continue;
+                        }
+                        WallpaperAngle.Sample sample=angleReader.parse(line);if(sample==null)continue;
+                        long wallTime=sample.wallTime(),age=System.currentTimeMillis()-wallTime;
                         if(wallTime<started||age< -50||age>600)continue;
-                        emit(Float.parseFloat(m.group(2)),SystemClock.elapsedRealtime()-Math.max(0,age),1,generation);
+                        emit(sample.angle(),SystemClock.elapsedRealtime()-Math.max(0,age),1,generation);
                     }
                 }
             }catch(Exception e){if(generation==angleGeneration)error=message(e);}
@@ -117,6 +134,7 @@ public final class ShellBridge extends IShellBridge.Stub {
     }
     @Override public void stopAngles(){authorize();long token=Binder.clearCallingIdentity();try{stopInternal();}finally{Binder.restoreCallingIdentity(token);}}
     private synchronized void stopInternal(){
+        stopLaunchRouting();
         ++angleGeneration;sink=null;
         if(logReader!=null){logReader.destroy();logReader=null;}
         if(sensorManager!=null)for(SensorEventListener listener:listeners)sensorManager.unregisterListener(listener);
@@ -127,6 +145,16 @@ public final class ShellBridge extends IShellBridge.Stub {
         authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
         try{if(sink==null)throw new IllegalStateException("@folduo/err_angle_stopped");control().hold(innerPrimary,previousOwner);result.putInt("ownerPid",android.os.Process.myPid());result.putBoolean("ok",true);}catch(Exception e){result.putString("error",message(e));}
         finally{Binder.restoreCallingIdentity(token);}return result;
+    }
+    @Override public synchronized Bundle holdNative(boolean inner){
+        authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{if(sink==null)throw new IllegalStateException("@folduo/err_angle_stopped");control().holdNative(inner);result.putBoolean("ok",true);}
+        catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(token);}return result;
+    }
+    @Override public synchronized Bundle holdPaired(boolean innerPrimary){
+        authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{if(sink==null)throw new IllegalStateException("@folduo/err_angle_stopped");control().holdPaired(innerPrimary);result.putBoolean("ok",true);}
+        catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(token);}return result;
     }
     @Override public synchronized Bundle moveApp(int sourceDisplayId,int targetDisplayId,boolean idle){
         authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
@@ -140,6 +168,8 @@ public final class ShellBridge extends IShellBridge.Stub {
     }
     @Override public void release(){authorize();long token=Binder.clearCallingIdentity();try{releaseInternal();}finally{Binder.restoreCallingIdentity(token);}}
     private synchronized void releaseInternal(){
+        stopLaunchRouting();
+        if(mirror!=null){mirror.close();mirror=null;}
         try{if(bars!=null)bars.hide(false);}catch(Exception e){error=message(e);}
         try{if(taskRouter!=null&&displayControl!=null&&displayControl.isOwned())taskRouter.restore();}catch(Exception e){error=message(e);}
         finally{if(displayControl!=null)displayControl.close();taskRouter=null;}
@@ -154,7 +184,7 @@ public final class ShellBridge extends IShellBridge.Stub {
     @Override public synchronized Bundle navigate(int displayId,int action,int taskId){
         authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
         try{
-            if(displayId!=1||sink==null||displayControl==null||!displayControl.isOwned())throw new IllegalStateException("@folduo/err_inner_unavailable");
+            if((displayId!=1&&(displayId!=0||mirror==null||!mirror.active()))||sink==null||displayControl==null||!displayControl.isOwned())throw new IllegalStateException("@folduo/err_inner_unavailable");
             if(taskRouter==null)taskRouter=new TaskDisplayRouter();
             if(action==android.view.KeyEvent.KEYCODE_HOME){
                 android.content.Intent home=new android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME);
@@ -170,6 +200,39 @@ public final class ShellBridge extends IShellBridge.Stub {
             result.putBoolean("ok",true);
         }catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(token);}return result;
     }
+    @Override public synchronized Bundle mirror(android.view.Surface surface,android.view.SurfaceControl parent,int width,int height,int density){
+        authorize();long identity=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{
+            if(sink==null||displayControl==null||!displayControl.isOwned())throw new IllegalStateException("Display control is unavailable");
+            if(mirror!=null)mirror.close();mirror=new WorkspaceMirror(context,new Handler(sensorThread.getLooper()),life);
+            mirror.start(surface,parent,width,height,density);result.putBoolean("ok",true);
+        }catch(Exception e){if(mirror!=null){mirror.close();mirror=null;}result.putString("error",message(e));}
+        finally{if(surface!=null)surface.release();if(parent!=null)parent.release();Binder.restoreCallingIdentity(identity);}return result;
+    }
+    @Override public synchronized Bundle workspace(boolean inner){
+        authorize();long identity=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{if(mirror==null)throw new IllegalStateException("Mirror is unavailable");mirror.workspace(inner);result.putBoolean("ok",true);}
+        catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(identity);}return result;
+    }
+    @Override public synchronized void mirrorTouch(android.view.MotionEvent event,int width,int height){
+        authorize();long identity=Binder.clearCallingIdentity();
+        try{if(event!=null&&mirror!=null&&sink!=null&&displayControl!=null&&displayControl.isOwned())mirror.touch(event,width,height);}
+        catch(Exception e){error=message(e);}finally{if(event!=null)event.recycle();Binder.restoreCallingIdentity(identity);}
+    }
+    @Override public synchronized Bundle innerWallpaper(){
+        authorize();long identity=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{
+            Class<?> api=Class.forName("android.app.IWallpaperManager");
+            IBinder binder=(IBinder)Class.forName("android.os.ServiceManager").getMethod("getService",String.class).invoke(null,"wallpaper");
+            Object manager=Class.forName(api.getName()+"$Stub").getMethod("asInterface",IBinder.class).invoke(null,binder);
+            try(ParcelFileDescriptor fd=(ParcelFileDescriptor)api.getMethod("semGetThumbnailFileDescriptor",int.class,int.class,int.class,Bundle.class).invoke(manager,5,0,0,new Bundle())){
+                if(fd==null)throw new IllegalStateException("Inner wallpaper thumbnail unavailable");
+                Bitmap bitmap=android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor());
+                if(bitmap==null)throw new IllegalStateException("Inner wallpaper thumbnail unreadable");
+                result.putParcelable("frame",bitmap);result.putBoolean("ok",true);
+            }
+        }catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(identity);}return result;
+    }
     @Override public synchronized Bundle launchApp(int displayId,String component){
         authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
         try{
@@ -183,6 +246,45 @@ public final class ShellBridge extends IShellBridge.Stub {
             result.putBoolean("ok",true);result.putBoolean("handled",true);
         }catch(Exception e){result.putString("error",message(e));}
         finally{Binder.restoreCallingIdentity(token);}return result;
+    }
+    @Override public synchronized Bundle routeInnerLaunches(boolean enabled){
+        authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{
+            if(!enabled)stopLaunchRouting();
+            else if(launchListener==null){
+                if(sink==null||displayControl==null||!displayControl.isOwned())throw new IllegalStateException("@folduo/err_inner_unavailable");
+                launchListener=new SecondaryLaunchListener(this::recoverLaunch);launchRecoveryError="";
+            }
+            result.putBoolean("ok",true);
+        }catch(Exception e){launchRecoveryError=message(e);result.putString("error",launchRecoveryError);}
+        finally{Binder.restoreCallingIdentity(token);}return result;
+    }
+    private synchronized void stopLaunchRouting(){
+        ++launchGeneration;
+        if(launchListener!=null){try{launchListener.close();}catch(Exception e){launchRecoveryError=message(e);}finally{launchListener=null;}}
+    }
+    private synchronized void recoverLaunch(int task){
+        if(launchListener==null||sink==null)return;
+        int ticket=launchGeneration;long received=SystemClock.elapsedRealtime();
+        launchJobs.execute(()->{
+            synchronized(ShellBridge.this){
+                if(ticket!=launchGeneration||launchListener==null||sink==null||displayControl==null||!displayControl.isOwned()||SystemClock.elapsedRealtime()-received>1000)return;
+                try{
+                    if(!"OPENED".equals(displayControl.baseName())||!screenUnlocked())return;
+                    if(taskRouter==null)taskRouter=new TaskDisplayRouter();
+                    if(taskRouter.resumeBlockedLaunch(task)){launchRecoveries++;launchRecoveryError="";android.util.Log.i("FolduoLaunch","recovered task="+task+" display=1");}
+                }catch(Exception e){launchRecoveryError=message(e);stopLaunchRouting();}
+            }
+        });
+    }
+    private boolean screenUnlocked()throws Exception{
+        // app_process lacks Android 17's shared-memory cache. Read the same
+        // power/keyguard services directly; failure still disables launch routing.
+        Method service=Class.forName("android.os.ServiceManager").getMethod("getService",String.class);
+        Object power=Class.forName("android.os.IPowerManager$Stub").getMethod("asInterface",IBinder.class).invoke(null,service.invoke(null,"power"));
+        if(!(boolean)Class.forName("android.os.IPowerManager").getMethod("isInteractive").invoke(power))return false;
+        Object window=Class.forName("android.view.IWindowManager$Stub").getMethod("asInterface",IBinder.class).invoke(null,service.invoke(null,"window"));
+        return !(boolean)Class.forName("android.view.IWindowManager").getMethod("isKeyguardLocked").invoke(window);
     }
     @Override public Bundle windowState(int displayId){
         authorize();long token=Binder.clearCallingIdentity();Bundle result=new Bundle();java.lang.Process process=null;
@@ -236,5 +338,5 @@ public final class ShellBridge extends IShellBridge.Stub {
         }catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(token);}
         return result;
     }
-    @Override public void destroy(){authorize();stopInternal();releaseInternal();life.shutdownNow();sensorThread.quitSafely();System.exit(0);}
+    @Override public void destroy(){authorize();stopInternal();releaseInternal();life.shutdownNow();launchJobs.shutdownNow();sensorThread.quitSafely();System.exit(0);}
 }

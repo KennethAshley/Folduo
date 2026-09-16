@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="nav_swipe_bottom">下端から上へスワイプでホーム。上へスワイプして止めると最近使ったアプリ。</string>
+    <string name="nav_swipe_side">左右の端から内側へスワイプで戻る。</string>
+    <string name="reveal_intro">外側と内側の左半分で逆方向のぼかしを表示し、実際のアプリへつなぎます。Samsungの操作、ランチャー、それぞれの壁紙を使用できます。</string>
+    <string name="source_hardware_log">Samsungハードウェアログ</string>
+    <string name="reveal_ready">待機中 · 折りたたみ中に演出</string>
+    <string name="reveal_screen_access">元の画面の画像を両画面に短時間表示し、ぼかしを逆方向に変化させます。画像はメモリ内だけで使用し、保存や送信はしません。保護された画面の取得はスキップします。</string>
+    <string name="reveal_preview">この画面で演出を試す</string>
+    <string name="reveal_recovery">Shizukuを起動し、全開または全閉の状態でFolduoを有効にしてください。画面制御は開閉の完了、ロック、停止、または30秒後に解除します。Androidのアニメーションが無効な場合は演出を行いません。</string>
     <string name="language_title">言語 / Language</string>
     <string name="language_current">言語 / Language: %1$s</string>
     <string name="language_system">端末の設定に合わせる</string>
@@ -25,10 +33,10 @@
     <string name="sensors_title">センサーの確認</string>
     <string name="probe_sensors">5秒間センサーを調べる</string>
     <string name="not_measured">まだ実測していません</string>
-    <string name="device_note">Fold7 SM-F966Z向け・実機で調整中</string>
+    <string name="device_note">Fold8 SM-F971U テスト版・互換性を検証中</string>
     <string name="need_overlay">先に「重ねて表示」を許可してください</string>
     <string name="need_shizuku">先にShizukuを接続してください</string>
-    <string name="unsupported_device">この版の画面制御はFold7 SM-F966Z向けです。見え方のデモは利用できます</string>
+    <string name="unsupported_device">画面制御には Fold7 SM-F966Z または Fold8 SM-F971U と対応する画面モードが必要です。デモは利用できます。</string>
     <string name="close_to_prepare">一度閉じると準備が完了します</string>
     <string name="probe_running">購読と受信件数を確認しています…端末を少し動かしてください</string>
     <string name="nav_recents">最近使ったアプリ</string>
@@ -67,7 +75,7 @@
     <string name="preparing_connection">接続を準備しています</string>
     <string name="helper_recovery">補助処理が途切れたため再接続しています</string>
     <string name="angle_recovery">細かな角度が途切れたため取得を再開しました</string>
-    <string name="angle_retry">角度を再取得しています。続かない場合は純正の動く壁紙を確認してください</string>
+    <string name="angle_retry">角度を再取得しています。続かない場合は一度完全に閉じてください。</string>
     <string name="angle_start_failed">角度の開始に失敗しました</string>
     <string name="angle_retry_error">角度の取得を再試行します: %1$s</string>
     <string name="coarse_angles">標準センサーは3段階です。細かな角度を待っています</string>
@@ -120,12 +128,12 @@
     <string name="gyro_result">2系統のジャイロ: %1$s</string>
     <string name="display_result">画面制御: %1$s</string>
     <string name="tagline">いつものアプリを、開閉の向こうへ。</string>
-    <string name="intro">既存のランチャーと共存する開閉演出アプリです。開閉中の像を奥に残し、手前の液晶がすりガラスとして動くように描きます。開始後に一度閉じると準備が完了します。使用中は前面を主画面に固定し、アプリだけを内外へ移します。開閉中の像を保ち、表示が整ってから元のアプリへつなぎます。</string>
-    <string name="inner_controls_body">内側の下端に、戻る・ホーム・最近使ったアプリ・設定を表示します。履歴では画面のカードを選んで切り替えます。操作バーはアプリの大きさを変えずに重なり、開閉中は隠れます。前面は純正の操作バーを使います。上部の時計・通知アイコンも開閉中だけ隠します。内側の操作バーはこのアプリの補助機能で、純正の通知パネルやジェスチャーを復元するものではありません。</string>
+    <string name="intro">外側の画面と内側の左半分に同じ画像を表示し、ヒンジに合わせてぼかしを逆方向に変化させます。開閉中は両画面を点灯し、完了後に切り替え先のサイズに合わせた実際のアプリを表示します。ランチャーとそれぞれの壁紙はそのままです。</string>
+    <string name="inner_controls_body">両画面でSamsung標準のホーム、戻る、最近使ったアプリ、通知のジェスチャーを使用できます。ぼかしの表示中は、実際のアプリが現れるまでタップを受け付けません。</string>
     <string name="setup_body">Shizukuを端末内のワイヤレスデバッグで起動し、このアプリに利用を許可してください。再起動後はShizukuの起動が必要です。</string>
     <string name="screen_access_body">開始後は、開閉時に他のアプリの画面を一時的に読み取り、角度に応じた立体視差とぼかしを重ねます。画像はメモリー内だけで使い、開閉終了・停止・ロック時に参照を破棄します。保存・送信はしません。保護された画面は取得しません。</string>
-    <string name="power_body">有効な間は両画面が点灯し、通常より電池を使います。停止・ロック時に通常の表示へ戻ります。既存版の角度補助処理を停止してから開始してください。同時に画面を制御する処理があれば、開始せず理由を表示します。</string>
-    <string name="recovery_body">通常は自動で接続を回復します。通知の「再開」でもやり直せます。ロックを解除してから一度完全に閉じてください。端末を再起動した場合は、先にShizukuを起動してください。アプリの強制停止やAndroidの実行中アプリ一覧で停止した場合は、この画面から再開します。</string>
+    <string name="power_body">演出中は両画面を点灯します。短時間の電源保持で、アプリの切り替え時に表示先が消灯するのを防ぎます。その後は通常の画面制御に戻り、待機中に両画面を点灯し続けることはありません。</string>
+    <string name="recovery_body">Shizukuを起動したままにしてください。有効化後は全開または全閉の状態から始めてください。ロック、停止、または30秒の上限で演出を終了します。再起動後はShizukuも再起動してください。Androidに停止された場合は、この画面で再度有効化します。</string>
     <string name="battery_body">電池の設定でこのアプリとShizukuを「制限なし」にすると、バックグラウンドで止められにくくなります。画面消灯中は画面の取得と開閉演出を休止します。</string>
     <string name="sensors_body">通常側と反対側のジャイロを別々に購読し、許可の有無と実際に届いた件数を確認します。2系統が使えるとは限りません。この診断だけでは画面を読み取りません。</string>
     <string name="preview_degrees">%1$sのデモ · %2$d°\n%3$s</string>
@@ -144,7 +152,7 @@
     <string name="err_monitor_inactive">開閉待機が有効ではありません</string>
     <string name="err_inner_unavailable">内側の操作を利用できません</string>
     <string name="err_unsupported_action">未対応の操作です</string>
-    <string name="err_wrong_model">この版はFold7 SM-F966Z向けです</string>
+    <string name="err_wrong_model">この版は Fold7 SM-F966Z と Fold8 SM-F971U のみに対応しています</string>
     <string name="err_states_unavailable">両画面の同時点灯に対応した状態を利用できません</string>
     <string name="err_unexpected_caller">許可されていない呼び出し元です</string>
     <string name="err_angle_stopped">角度の取得は停止しています</string>

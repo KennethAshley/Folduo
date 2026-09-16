@@ -1,0 +1,32 @@
+package jp.bunkaich.sukashimotion;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.view.*;
+import android.widget.*;
+import java.util.function.Consumer;
+import java.util.function.BiConsumer;
+
+/** Transparent task content above the selected inner Home wallpaper. */
+final class InnerWorkspace implements AutoCloseable {
+    private final WindowManager window;private final FrameLayout root;
+    private boolean closed;
+    InnerWorkspace(Context context,Bitmap wallpaper,IShellBridge bridge,BiConsumer<Surface,SurfaceControl> ready,Consumer<Exception> failed){
+        window=context.getSystemService(WindowManager.class);root=new FrameLayout(context);
+        ImageView background=new ImageView(context);background.setImageBitmap(wallpaper);background.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        root.addView(background,new FrameLayout.LayoutParams(-1,-1));
+        SurfaceView surface=new SurfaceView(context);surface.setZOrderOnTop(true);surface.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+        surface.getHolder().addCallback(new SurfaceHolder.Callback(){
+            public void surfaceCreated(SurfaceHolder holder){if(!closed)ready.accept(holder.getSurface(),surface.getSurfaceControl());}
+            public void surfaceChanged(SurfaceHolder holder,int format,int width,int height){}
+            public void surfaceDestroyed(SurfaceHolder holder){}
+        });
+        surface.setOnTouchListener((view,event)->{try{bridge.mirrorTouch(event,view.getWidth(),view.getHeight());}catch(Exception e){failed.accept(e);}return true;});
+        root.addView(surface,new FrameLayout.LayoutParams(-1,-1));
+        WindowManager.LayoutParams lp=new WindowManager.LayoutParams(-1,-1,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,PixelFormat.TRANSLUCENT);
+        lp.setFitInsetsTypes(0);lp.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;lp.setTitle("Folduo inner workspace");
+        try{window.addView(root,lp);}catch(RuntimeException e){close();throw e;}
+    }
+    @Override public void close(){closed=true;if(root.isAttachedToWindow())window.removeViewImmediate(root);}
+}

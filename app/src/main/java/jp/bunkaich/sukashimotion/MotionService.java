@@ -27,6 +27,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private boolean layoutPrepared,layoutPreparing,layoutRecovering,fixedPrimaryInner;
     private IShellBridge bound;private FoldPolicy policy;private float target=Float.NaN,smoothed=Float.NaN;
     private LocaleList uiLocales;private InnerNavigation navigation;private String navigationError="";
+    private InnerWorkspace workspace;private boolean mirrorReady,checkingMirror;private long mirrorCheckedAt;
     private long measuredAt,lastFrame;private int source=-1;private DisplayManager displays;
     private final ArrayDeque<String> angleHistory=new ArrayDeque<>();
     private long layerSerial;private long acceptedAngles;private String anchorError="",stage="idle";
@@ -104,12 +105,17 @@ public final class MotionService extends Service implements DisplayManager.Displ
         long now=SystemClock.elapsedRealtime();
         // Wallpaper reports are continuous; a dead log reader or heartbeat expiry can
         // stop them while the binder itself remains alive. Re-register, not just wait.
-        if(!paused&&bound!=null&&now-angleStartedAt>5000&&((source==1&&now-measuredAt>1500)||source<1)){
+        if(!paused&&bound!=null&&now-angleStartedAt>5000&&((source==1&&now-measuredAt>1500)||(source<1&&!layoutPrepared))){
             cancelSession();source=-1;target=smoothed=Float.NaN;measuredAt=0;blockedUntilEndpoint=false;
             removeAnchors();rebuildPanels();recordRecovery(UiText.of(R.string.angle_recovery));status=UiText.of(R.string.angle_retry);startAngles(bound);
         }
         if(!paused&&layoutPrepared)recoverLayoutIfNeeded();
-        if(!paused&&layoutPrepared&&policy!=null&&policy.active&&Float.isFinite(target))handle(policy.update(target,SystemClock.elapsedRealtime()));
+        if(!paused&&layoutPrepared&&mirrorReady&&!checkingMirror&&now-mirrorCheckedAt>1000){
+            checkingMirror=true;mirrorCheckedAt=now;IShellBridge bridge=bound;int session=sessionSerial;
+            controls.execute(()->{try{Bundle state=bridge.inspect();main.post(()->{checkingMirror=false;if(session==sessionSerial&&!state.getBoolean("mirrorActive"))fail(UiText.raw("Inner workspace stopped: "+state.getString("mirrorError","")));});}catch(Exception e){main.post(()->{checkingMirror=false;if(session==sessionSerial)fail(UiText.error(e));});}});
+        }
+        if(!paused&&!layoutPrepared&&!layoutPreparing&&source>=0&&Float.isFinite(target))prepareIfClosed();
+        if(!paused&&layoutPrepared&&policy!=null&&policy.active&&Float.isFinite(target))handle(policy.update(target,SystemClock.elapsedRealtime(),source==HardwareAngle.SOURCE));
         updateNavigation();updateNotification();main.postDelayed(this,100);
     }};
     private void startAngles(IShellBridge bridge){
@@ -121,23 +127,33 @@ public final class MotionService extends Service implements DisplayManager.Displ
     }
     private void accept(float value,long at,int kind){
         if(stopped||paused||bound==null||!Float.isFinite(value)||at>SystemClock.elapsedRealtime()+50||SystemClock.elapsedRealtime()-at>600)return;
-        if(kind==0){if(source<1)status=UiText.of(R.string.coarse_angles);return;}
+        if(kind==0){
+            if(source<1){
+                status=UiText.of(R.string.coarse_angles);
+                // A real CLOSED sample can arm the existing cover mapping after a
+                // screen-off reset. Intermediate motion still requires a fine source.
+                if(value==0&&!layoutPrepared){source=0;target=smoothed=0;measuredAt=at;prepareIfClosed();}
+            }
+            return;
+        }
         // Direct fine sensors take priority while active; wallpaper is the fallback.
         if(kind==1&&source>=2)return;
         if(kind==source&&at<measuredAt)return;
         source=kind;measuredAt=at;target=value;
         acceptedAngles++;
         synchronized(angleHistory){if(angleHistory.size()>=160)angleHistory.removeFirst();angleHistory.addLast(at+":"+value+":"+kind);}
-        if(blockedUntilEndpoint){if(SystemClock.elapsedRealtime()<retryAt||value>3&&value<177)return;blockedUntilEndpoint=false;policy=new FoldPolicy(value>=177);}if(!Float.isFinite(smoothed))smoothed=value;
-        status=UiText.of(R.string.angle_status,Math.round(value),UiText.of(kind==1?R.string.source_wallpaper:kind==2?R.string.source_samsung:R.string.source_standard));
-        if(!layoutPrepared){
-            Panel primary=panelById(0);
-            // Samsung cancels INNER_DEFAULT on complete closure. Arm OUTER_DEFAULT only
-            // once the normal closed layout is present, avoiding a primary-panel swap.
-            if(primary==null||primary.inner||primary.display.getState()!=Display.STATE_ON||value>3){status=UiText.of(R.string.close_to_prepare);return;}
-            if(!layoutPreparing){fixedPrimaryInner=false;prepareLayout();}return;
-        }
-        if(policy!=null)handle(policy.update(value,SystemClock.elapsedRealtime()));scheduleFrame();
+        if(blockedUntilEndpoint){if(SystemClock.elapsedRealtime()<retryAt||value>(kind==HardwareAngle.SOURCE?10:3)&&value<(kind==HardwareAngle.SOURCE?170:177))return;blockedUntilEndpoint=false;policy=new FoldPolicy(value>=170);}if(!Float.isFinite(smoothed))smoothed=value;
+        status=UiText.of(R.string.angle_status,Math.round(value),UiText.of(kind==1?R.string.source_wallpaper:kind==2?R.string.source_samsung:kind==HardwareAngle.SOURCE?R.string.source_hardware_log:R.string.source_standard));
+        if(!layoutPrepared){prepareIfClosed();return;}
+        if(policy!=null)handle(policy.update(value,SystemClock.elapsedRealtime(),kind==HardwareAngle.SOURCE));scheduleFrame();
+    }
+    private void prepareIfClosed(){
+        if(layoutPreparing||blockedUntilEndpoint)return;
+        Panel primary=panelById(0);
+        // The last angle can arrive before Samsung finishes activating the cover.
+        // Health retries this check after the display change without inventing a sample.
+        if(primary==null||primary.inner||primary.display.getState()!=Display.STATE_ON||target>(source==HardwareAngle.SOURCE?10:3)){status=UiText.of(R.string.close_to_prepare);return;}
+        fixedPrimaryInner=false;prepareLayout();
     }
     private void prepareLayout(){
         int ticket=++generation;layoutPreparing=true;trace("prepare-stable-panels");IShellBridge bridge=bound;
@@ -155,7 +171,26 @@ public final class MotionService extends Service implements DisplayManager.Displ
             if(attempt>=35){fail(UiText.of(R.string.prepare_unconfirmed));return;}
             main.postDelayed(()->awaitLayout(ticket,attempt+1),40);return;
         }
-        layoutPrepared=true;layoutPreparing=false;policy=new FoldPolicy(Float.isFinite(target)?target>=90:fixedPrimaryInner);trace("stable-panels-ready");
+        if(workspace!=null)return;
+        IShellBridge bridge=bound;Panel inner=findPanel(true,true);int session=sessionSerial;
+        controls.execute(()->{try{
+            Bundle result=bridge.innerWallpaper();Bitmap wallpaper=result.getParcelable("frame",Bitmap.class);
+            if(wallpaper==null)throw new IllegalStateException(result.getString("error","Inner wallpaper unavailable"));
+            main.post(()->{
+                if(stopped||ticket!=generation||session!=sessionSerial)return;
+                try{
+                    Context local=createDisplayContext(inner.display).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,null);
+                    workspace=new InnerWorkspace(local,wallpaper,bridge,(surface,parent)->controls.execute(()->{
+                        try{
+                            if(stopped||session!=sessionSerial)return;
+                            Bundle started=bridge.mirror(surface,parent,inner.w,inner.h,local.getResources().getDisplayMetrics().densityDpi);
+                            if(!started.getBoolean("ok"))throw new IllegalStateException(started.getString("error"));
+                            main.post(()->{if(stopped||session!=sessionSerial)return;mirrorReady=true;layoutPrepared=true;layoutPreparing=false;policy=new FoldPolicy(false);trace("stable-mirror-ready");});
+                        }catch(Exception e){main.post(()->{if(session==sessionSerial)fail(UiText.error(e));});}
+                    }),error->{if(session==sessionSerial)fail(UiText.error(error));});
+                }catch(Exception e){fail(UiText.error(e));}
+            });
+        }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.error(e));});}});
     }
     private void recoverLayoutIfNeeded(){
         if(stopped||paused||!layoutPrepared||layoutRecovering||bound==null)return;
@@ -251,9 +286,9 @@ public final class MotionService extends Service implements DisplayManager.Displ
         IShellBridge bridge=bound;
         controls.execute(()->{try{
             if(ticket!=generation||stopped||bridge==null)return;
-            Bundle result=bridge.moveApp(source.display.getDisplayId(),destination.display.getDisplayId(),false);
+            Bundle result=bridge.workspace(opening);
             if(!result.getBoolean("ok"))throw new IllegalStateException(result.getString("error"));
-            main.post(()->{if(ticket==generation){trace("app-moved-without-display-swap");awaitPanels(ticket,opening,0);}});
+            main.postDelayed(()->{if(ticket==generation){trace("workspace-resized-without-display-swap");awaitPanels(ticket,opening,0);}},180);
         }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.of(R.string.handoff_failed,UiText.error(e)));});}});
     }
     private void awaitPanels(int ticket,boolean opening,int attempt){
@@ -274,7 +309,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         jobs.execute(()->{try{
             long deadline=SystemClock.elapsedRealtime()+1800;String previous="";int consecutive=0;
             while(!stopped&&ticket==generation&&SystemClock.elapsedRealtime()<deadline){
-                Bundle state=bridge.windowState(panel.display.getDisplayId());String geometry=state.getString("geometry","");
+                Bundle state=bridge.windowState(0);String geometry=state.getString("geometry","");
                 consecutive=state.getBoolean("ready")&&!geometry.isEmpty()?(geometry.equals(previous)?consecutive+1:1):0;previous=geometry;
                 if(consecutive>=2){main.post(()->{if(ticket==generation&&!stopped){trace("app-frame-ready");ready.run();}});return;}
                 Thread.sleep(32);
@@ -360,18 +395,20 @@ public final class MotionService extends Service implements DisplayManager.Displ
         awaitApp(ticket,destination,()->{
             trace("handoff-with-stable-panels");
             for(Layer layer:layers)layer.root.animate().alpha(0).setDuration(180).setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator()).start();
-            main.postDelayed(()->{if(ticket!=generation)return;removeLayers();frozen.clear();finishing=false;smoothed=target;restoreStatusIcons();trace("idle");updateNavigation();},200);
+            main.postDelayed(()->{if(ticket!=generation)return;removeLayers();frozen.clear();finishing=false;smoothed=target;restoreStatusIcons();trace("idle");updateNavigation();
+            },200);
         });
     }
     private void cancelSession(){
         ++generation;++sessionSerial;busy=false;finishing=false;layoutPrepared=layoutPreparing=layoutRecovering=false;removeNavigation();removeLayers();frozen.clear();
+        mirrorReady=false;checkingMirror=false;if(workspace!=null){workspace.close();workspace=null;}
         if(policy!=null)policy.active=false;
         IShellBridge bridge=bound;if(bridge!=null)controls.execute(()->{try{bridge.release();}catch(Exception ignored){}});
     }
     private void restoreStatusIcons(){IShellBridge bridge=bound;if(bridge!=null)controls.execute(()->{try{bridge.statusIcons(false);}catch(Exception ignored){}});}
     private void updateNavigation(){
         Panel inner=findPanel(true,true);
-        boolean show=!stopped&&!paused&&layoutPrepared&&!busy&&!finishing&&policy!=null&&!policy.active&&target>=176&&inner!=null&&inner.display.getDisplayId()==1;
+        boolean show=!stopped&&!paused&&layoutPrepared&&mirrorReady&&!busy&&!finishing&&policy!=null&&!policy.active&&target>=(source==HardwareAngle.SOURCE?170:176)&&inner!=null&&inner.display.getDisplayId()==1;
         if(!show){removeNavigation();return;}
         if(navigation!=null&&navigation.width==inner.w&&navigation.height==inner.h)return;
         removeNavigation();
@@ -385,7 +422,8 @@ public final class MotionService extends Service implements DisplayManager.Displ
         if(bridge==null||owner==null||busy||finishing)return;
         controls.execute(()->{try{
             if(stopped||session!=sessionSerial)return;
-            Bundle result=bridge.navigate(owner.displayId,action,taskId);
+            Bundle result=bridge.navigate(0,action,taskId);
+            if(BuildConfig.DEBUG)android.util.Log.i("FolduoNavigation","result action="+action+" ok="+result.getBoolean("ok")+" error="+result.getString("error",""));
             main.post(()->{
                 if(stopped||session!=sessionSerial||navigation!=owner)return;
                 if(!result.getBoolean("ok")){navigationError=result.getString("error");android.widget.Toast.makeText(this,getString(R.string.navigation_failed,UiText.raw(navigationError).resolve(this)),android.widget.Toast.LENGTH_SHORT).show();return;}
@@ -405,7 +443,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
                 if(stopped||session!=sessionSerial||navigation!=owner||!owner.showingRecents())return;
                 try{
                     int task=app.getInt("taskId",-1);
-                    Bundle result=bridge.navigate(1,InnerNavigation.PREVIEW,task);
+                    Bundle result=bridge.navigate(0,InnerNavigation.PREVIEW,task);
                     Bitmap image=result.getParcelable("preview",Bitmap.class);
                     if(image!=null)main.post(()->{if(!stopped&&session==sessionSerial&&navigation==owner)owner.setPreview(task,image);});
                 }catch(Exception ignored){} // An unavailable/protected preview leaves the app icon.
@@ -455,9 +493,10 @@ public final class MotionService extends Service implements DisplayManager.Displ
         out.println("busy="+busy+" blocked="+blockedUntilEndpoint+" panels="+panelSignature+" anchors="+anchors.size()+" layers="+layers.size()+" anchorError="+anchorError);
         out.println("fixedPrimaryInner="+fixedPrimaryInner+" layoutPrepared="+layoutPrepared+" layoutPreparing="+layoutPreparing+" layoutRecovering="+layoutRecovering);
         out.println("innerNavigation="+(navigation!=null)+" navigationError="+navigationError);
+        out.println("mirrorReady="+mirrorReady+" workspace="+(workspace!=null));
         out.println("stage="+stage+" history="+String.join(",",handoffs));
         synchronized(angleHistory){out.println("angles="+String.join(",",angleHistory));}
-        IShellBridge bridge=bound;if(bridge!=null)try{Bundle report=bridge.inspect();out.println("statusIconsHidden="+report.getBoolean("statusIconsHidden"));out.println(MainActivity.formatReport(this,report));}catch(Exception e){out.println(ShellBridge.message(e));}
+        IShellBridge bridge=bound;if(bridge!=null)try{Bundle report=bridge.inspect();out.println("statusIconsHidden="+report.getBoolean("statusIconsHidden"));out.println("routingInnerLaunches="+report.getBoolean("routingInnerLaunches")+" launchRecoveries="+report.getInt("launchRecoveries")+" launchError="+report.getString("launchRecoveryError",""));out.println(MainActivity.formatReport(this,report));}catch(Exception e){out.println(ShellBridge.message(e));}
     }
     public void onDisplayAdded(int id){rebuildPanels();recoverLayoutIfNeeded();}public void onDisplayRemoved(int id){rebuildPanels();recoverLayoutIfNeeded();}public void onDisplayChanged(int id){rebuildPanels();recoverLayoutIfNeeded();}
     @Override public void onDestroy(){

@@ -6,6 +6,7 @@ import android.content.Context;
 import android.os.*;
 import java.io.*;
 import java.lang.reflect.Method;
+import jp.bunkaich.sukashimotion.DeviceSupport;
 
 /** Optional, explicit ADB setup for the tested Fold7; changes front HOME only. */
 public final class CoverWallpaperSetup {
@@ -29,8 +30,8 @@ public final class CoverWallpaperSetup {
         String action = args.length == 0 ? "status" : args[0];
         if (!action.equals("status") && !action.equals("apply") && !action.equals("restore-stock"))
             throw new IllegalArgumentException("Use status, apply, or restore-stock");
-        if (android.os.Process.myUid() != 2000 || !"SM-F966Z".equals(Build.MODEL))
-            throw new IllegalStateException("This setup is limited to ADB shell on the tested SM-F966Z");
+        if (android.os.Process.myUid() != 2000 || !DeviceSupport.supports(Build.MODEL))
+            throw new IllegalStateException("This setup requires ADB shell on SM-F966Z or SM-F971U");
         Looper.prepareMainLooper();
         Class<?> at = Class.forName("android.app.ActivityThread");
         Object thread = at.getMethod("systemMain").invoke(null);

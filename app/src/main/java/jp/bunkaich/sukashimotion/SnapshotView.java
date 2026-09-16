@@ -7,8 +7,9 @@ import android.view.View;
 
 final class SnapshotView extends View {
     final RuntimeShader shader=new RuntimeShader(FoldShader.CODE);final Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG);
-    FrameTexture frame;final boolean inner,leftOnly;
-    int logicalWidth; private float angle;private FrameTexture rearFrame;private long rearSince;private boolean sharpHold;
+    FrameTexture frame;boolean inner;final boolean leftOnly;
+    int logicalWidth;boolean flatProjection; private float angle;private FrameTexture rearFrame;private long rearSince;private boolean sharpHold;
+    private float blurFloor,layoutBlend=-1;
     private final Paint holdPaint=new Paint(Paint.FILTER_BITMAP_FLAG);
     SnapshotView(Context context,FrameTexture frame,boolean inner,boolean leftOnly){
         super(context);this.frame=frame;this.inner=inner;this.leftOnly=leftOnly;angle=inner?180:0;paint.setShader(shader);
@@ -27,7 +28,7 @@ final class SnapshotView extends View {
         for(int i=0;i<BlurCache.LEVELS.length;i++)shader.setInputShader("rest"+(int)BlurCache.LEVELS[i],bitmap(frame.levels[i],1,1,0));
         shader.setFloatUniform("cacheScale",frame.levels[0].getWidth()/(float)w,frame.levels[0].getHeight()/(float)h);
         // Cover sees the SAME right half of the inner snapshot, not an unrelated wallpaper.
-        FrameTexture linked=rearFrame==null?frame:rearFrame;boolean crop=rearFrame!=null;
+        FrameTexture linked=rearFrame==null?frame:rearFrame;boolean crop=rearFrame!=null&&layoutBlend<0;
         shader.setInputShader("rear",bitmap(linked.sharp,w*(crop?2f:1f)/linked.sharp.getWidth(),h/(float)linked.sharp.getHeight(),crop?-w:0));
         for(int i=0;i<BlurCache.LEVELS.length;i++)shader.setInputShader("rear"+(int)BlurCache.LEVELS[i],bitmap(linked.levels[i],1,1,crop?-linked.levels[i].getWidth()*.5f:0));
         shader.setFloatUniform("rearCacheScale",linked.levels[0].getWidth()*(crop?.5f:1f)/w,linked.levels[0].getHeight()/(float)h);
@@ -35,6 +36,13 @@ final class SnapshotView extends View {
         shader.setFloatUniform("pixelsPerDp",getResources().getDisplayMetrics().density);shader.setFloatUniform("radiusDp",28);
     }
     void setFrame(FrameTexture next){frame=next;bindTextures();invalidate();}
+    void setBlurFloor(float radius){blurFloor=Math.max(0,Math.min(60,radius));invalidate();}
+    void setLayoutBlend(FrameTexture next,float progress){
+        boolean changed=rearFrame!=next||layoutBlend<0;
+        rearFrame=next;layoutBlend=Math.max(0,Math.min(1,progress));
+        if(changed)bindTextures();invalidate();
+    }
+    void setPanel(FrameTexture next,boolean inside){inner=inside;setFrame(next);}
     void setSharpHold(boolean value){sharpHold=value;invalidate();}
     void afterFrame(Runnable committed){
         getViewTreeObserver().registerFrameCommitCallback(committed);invalidate();
@@ -50,12 +58,13 @@ final class SnapshotView extends View {
     @Override protected void onDraw(Canvas canvas){
         if(sharpHold||!frame.prepared){canvas.drawColor(Color.BLACK);canvas.drawBitmap(frame.sharp,null,new Rect(0,0,getWidth(),getHeight()),holdPaint);return;}
         GlassProjection.Pose pose=GlassProjection.coverPose(angle);
-        shader.setFloatUniform("pose",pose.expansion(),pose.taper());
+        shader.setFloatUniform("pose",flatProjection?0:pose.expansion(),flatProjection?0:pose.taper());
         GlassProjection.Plane plane=GlassProjection.innerPlane(angle);
-        shader.setFloatUniform("innerDepth",plane.depth());
+        shader.setFloatUniform("innerDepth",flatProjection?0:plane.depth());
         shader.setFloatUniform("amount",FoldPolicy.blur(angle,inner));
+        shader.setFloatUniform("blurFloor",blurFloor);
         float ready=rearSince==0?1:Math.min(1,(SystemClock.uptimeMillis()-rearSince)/160f);ready=ready*ready*(3-2*ready);
-        shader.setFloatUniform("rearBlend",rearFrame==null?0:GlassProjection.rearWeight(angle)*ready);
+        shader.setFloatUniform("rearBlend",layoutBlend>=0?layoutBlend:rearFrame==null?0:GlassProjection.rearWeight(angle)*ready);
         canvas.drawRect(0,0,getWidth(),getHeight(),paint);if(ready<1)postInvalidateOnAnimation();
     }
 }

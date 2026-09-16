@@ -116,7 +116,7 @@ public class LanguageTest {
             InnerNavigation nav=new InnerNavigation(a.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,null),0,1968,2184,(action,task)->{});
             try{
                 boolean found=false;
-                for(View root:WindowInspector.getGlobalWindowViews())found|=hasDescription(root,"Recent apps");
+                for(View root:WindowInspector.getGlobalWindowViews())found|=hasDescription(root,"Home");
                 assertTrue("Overlay controls use the app language",found);
             }finally{nav.close();}
             Bundle b=new Bundle();b.putInt("uid",2000);b.putString("display","inner=0 / cover=1");

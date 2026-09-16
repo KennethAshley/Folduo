@@ -1,3 +1,23 @@
+## Galaxy Z Fold8 experimental fork
+
+This fork adapts [bunkaich/Folduo](https://github.com/bunkaich/Folduo) for the
+Galaxy Z Fold8 **SM-F971U**, tested on Android 17 / One UI 9.0. Current version:
+**0.1.21-fold8.21** (build 62).
+
+- Keeps your selected launcher, separate wallpapers, and native navigation.
+- Uses Shizuku to show opposing blur on both screens during folding, then reveal
+  the active app at the destination screen's size.
+- Closing blends into a native cover-sized image; visual tuning is still in progress.
+
+See [FOLD8.md](FOLD8.md) for implementation details, build commands, verified
+checks, and remaining limitations. Diagnostic logs referenced there are local
+development artifacts and are not included in this repository.
+
+**The documentation and downloads below describe the upstream Fold7 version.**
+Its stock-wallpaper setup and custom inner navigation do not describe this fork.
+
+---
+
 **Vibe-coded with GPT-6 Astra in Codex.**
 
 English | [日本語](README.ja.md)

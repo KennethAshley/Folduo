@@ -62,14 +62,12 @@ final class TaskDisplayRouter {
     private void moveHomeTask(Object task,int destination)throws Exception{
         int source=number(task,"displayId"),id=number(task,"taskId");
         if(source==destination){resumeHomeTask(id,destination);return;}
-        Object sourceRoot=home(source),destinationRoot=home(destination);
+        Object sourceRoot=home(source);
         if(sourceRoot==null)throw new IllegalStateException("@folduo/err_source_home_missing");
-        // Keep Samsung's one-HOME-root-per-display invariant, but transfer the
-        // selected launcher's child task, not the other display's stale home.
-        if(destinationRoot!=null&&id!=number(sourceRoot,"taskId")){
-            api.getMethod("moveTaskToRootTask",int.class,int.class,boolean.class).invoke(manager,id,number(destinationRoot,"taskId"),true);
-            resumeHomeTask(id,destination);
-        }else moveHome(sourceRoot,destination,true);
+        // Let Android resume the selected child in the destination HOME root.
+        // moveTaskToRootTask only accepts standard roots, even for shell callers.
+        if(id!=number(sourceRoot,"taskId"))resumeHomeTask(id,destination);
+        else moveHome(sourceRoot,destination,true);
     }
     private void resumeHomeTask(int id,int display)throws Exception{
         int result=(int)api.getMethod("startActivityFromRecents",int.class,Bundle.class).invoke(manager,id,ActivityOptions.makeBasic().setLaunchDisplayId(display).toBundle());
@@ -77,6 +75,18 @@ final class TaskDisplayRouter {
         api.getMethod("setFocusedTask",int.class).invoke(manager,id);lastDestination=display;
     }
     private List<?> tasks(int display)throws Exception{return (List<?>)api.getMethod("getTasks",int.class,boolean.class,boolean.class,int.class).invoke(manager,1,false,false,display);}
+    synchronized boolean resumeBlockedLaunch(int taskId)throws Exception{
+        List<?> running=(List<?>)api.getMethod("getTasks",int.class,boolean.class,boolean.class,int.class).invoke(manager,64,false,false,0);
+        for(Object task:running)if(number(task,"taskId")==taskId&&standard(task)){
+            int result=(int)api.getMethod("startActivityFromRecents",int.class,Bundle.class).invoke(manager,taskId,ActivityOptions.makeBasic().setLaunchDisplayId(1).toBundle());
+            if(result<0)throw new IllegalStateException("@folduo/err_launch_unconfirmed");
+            movedTasks.add(taskId);lastDestination=1;api.getMethod("setFocusedTask",int.class).invoke(manager,taskId);
+            for(Object destination:(List<?>)api.getMethod("getTasks",int.class,boolean.class,boolean.class,int.class).invoke(manager,64,false,false,1))
+                if(number(destination,"taskId")==taskId)return true;
+            throw new IllegalStateException("@folduo/err_launch_unconfirmed");
+        }
+        return false; // Already moved, finished, or a HOME/system task: never substitute another app.
+    }
     synchronized Bundle move(int source,int destination,boolean idle)throws Exception{
         Bundle result=new Bundle();List<?> tasks=tasks(source);
         if(!tasks.isEmpty()&&activityType(tasks.get(0))==2){
@@ -105,9 +115,9 @@ final class TaskDisplayRouter {
             try{
                 android.content.pm.ApplicationInfo info=context.getPackageManager().getApplicationInfo(component.getPackageName(),0);
                 row.putString("label",String.valueOf(info.loadLabel(context.getPackageManager())));
-                android.graphics.drawable.Drawable icon=info.loadIcon(context.getPackageManager());
-                android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(96,96,android.graphics.Bitmap.Config.ARGB_8888);
-                icon.setBounds(0,0,96,96);icon.draw(new android.graphics.Canvas(bitmap));row.putParcelable("icon",bitmap);
+                // Samsung live icons render text; app_process has no initialized font runtime.
+                // Leave icon loading to the normal application process that draws the cards.
+                row.putString("package",component.getPackageName());
             }catch(android.content.pm.PackageManager.NameNotFoundException unavailable){continue;}
             result.add(row);if(result.size()>=12)break;
         }
@@ -116,7 +126,9 @@ final class TaskDisplayRouter {
     synchronized void selectRecent(int taskId,int display)throws Exception{
         Object slice=api.getMethod("getRecentTasks",int.class,int.class,int.class).invoke(manager,64,2,android.os.Process.myUid()/100000);
         for(Object task:(List<?>)slice.getClass().getMethod("getList").invoke(slice))if(number(task,"taskId")==taskId&&standard(task)){
-            api.getMethod("startActivityFromRecents",int.class,Bundle.class).invoke(manager,taskId,ActivityOptions.makeBasic().setLaunchDisplayId(display).toBundle());lastDestination=display;movedTasks.add(taskId);focusTop(display);return;
+            api.getMethod("startActivityFromRecents",int.class,Bundle.class).invoke(manager,taskId,ActivityOptions.makeBasic().setLaunchDisplayId(display).toBundle());lastDestination=display;movedTasks.add(taskId);
+            // The top-task query can still report Home while this launch is committing.
+            api.getMethod("setFocusedTask",int.class).invoke(manager,taskId);return;
         }
         throw new IllegalStateException("@folduo/err_app_finished");
     }
@@ -181,7 +193,7 @@ final class TaskDisplayRouter {
                 int id = number(task, "taskId");
                 int result = (int) api.getMethod("startActivityFromRecents", int.class, Bundle.class).invoke(manager, id, ActivityOptions.makeBasic().setLaunchDisplayId(display).toBundle());
                 if (result < 0) throw new IllegalStateException("@folduo/err_launch_unconfirmed");
-                movedTasks.add(id); lastDestination = display; focusTop(display);
+                movedTasks.add(id); lastDestination = display; api.getMethod("setFocusedTask",int.class).invoke(manager,id);
                 android.util.Log.i("FolduoLaunch", "selected task=" + id + " display=" + display);
                 return;
             }

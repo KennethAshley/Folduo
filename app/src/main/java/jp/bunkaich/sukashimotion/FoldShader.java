@@ -10,7 +10,7 @@ final class FoldShader {
         uniform float2 size; uniform float2 cacheScale; uniform float2 rearCacheScale;
         uniform float2 pose; uniform float innerDepth;
         uniform float amount; uniform float inner;
-        uniform float radiusDp; uniform float rearBlend; uniform float pixelsPerDp;
+        uniform float radiusDp; uniform float rearBlend; uniform float pixelsPerDp; uniform float blurFloor;
         half blurWeight(float radius,float lower,float upper) {
             // Gaussian variance, not radius, is additive when mixing cached images.
             // This keeps the effective radius proportional to the hinge angle.
@@ -39,8 +39,8 @@ final class FoldShader {
         half4 main(float2 p) {
             float page=size.x*mix(1.0,.5,inner);
             if(inner>.5) {
-                if(p.x>=page || innerDepth<=0.0)return half4(content.eval(p).rgb,1);
-            } else if(amount<=0.0)return half4(content.eval(p).rgb,1);
+                if(p.x>=page || (innerDepth<=0.0 && amount<=0.0))return half4(content.eval(p).rgb,1);
+            } else if(amount<=0.0 && blurFloor<=0.0 && rearBlend<=0.0)return half4(content.eval(p).rgb,1);
             float hinge=inner*page;
             float direction=mix(1.0,-1.0,inner);
             float distance=clamp((p.x-hinge)*direction/page,0.0,1.0);
@@ -61,6 +61,7 @@ final class FoldShader {
             // joins the sharp right pane with zero slope. Cap the far edge at 28dp.
             // Keep the accepted radius in source-image space, independent of taper.
             if(inner>.5)radius=radiusDp*amount*distance*distance;
+            radius=max(radius,blurFloor);
             // Both images use the same angle-driven radius. Linking a prepared rear
             // image must not impose a sudden blur floor or change optical strength.
             half4 color=frost(q,radius);

@@ -24,7 +24,14 @@ public class ServiceLifecycleTest {
   public Bundle statusIcons(boolean hidden){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
   public Bundle navigate(int displayId,int action,int taskId){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
   public Bundle launchApp(int displayId,String component){Bundle b=new Bundle();b.putBoolean("ok",true);b.putBoolean("handled",true);return b;}
+  public Bundle routeInnerLaunches(boolean enabled){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public Bundle mirror(android.view.Surface surface,android.view.SurfaceControl parent,int width,int height,int density){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public Bundle workspace(boolean inner){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public void mirrorTouch(android.view.MotionEvent event,int width,int height){}
+  public Bundle innerWallpaper(){Bundle b=new Bundle();b.putParcelable("frame",PreviewActivity.sample(400,500));b.putBoolean("ok",true);return b;}
   public Bundle hold(boolean inner,int previousOwner){holds++;if(holdEntered!=null){holdEntered.countDown();try{allowHold.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}}Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public Bundle holdNative(boolean inner){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public Bundle holdPaired(boolean inner){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
   public void release(){releases++;}public void heartbeat(){}public void startAngles(IAngleSink sink){this.sink=sink;starts++;}public void stopAngles(){if(stopEntered!=null){stopEntered.countDown();try{allowStop.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}}sink=null;}public void destroy(){}
  }
  interface Check { boolean ok(); }
@@ -33,6 +40,7 @@ public class ServiceLifecycleTest {
   context=InstrumentationRegistry.getInstrumentation().getTargetContext();
   MotionSettings.setEnabled(context,false);
   activity=InstrumentationRegistry.getInstrumentation().startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+  InstrumentationRegistry.getInstrumentation().runOnMainSync(()->activity.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON));
   bridge=new FakeBridge();BridgeConnection.bridge=bridge;
   context.startForegroundService(new Intent(context,MotionService.class));waitFor(()->MotionService.running&&bridge.sink!=null);
  }
@@ -42,7 +50,17 @@ public class ServiceLifecycleTest {
  }
  @Test public void coarseAnglesDoNotCaptureOrInventIntermediateValues()throws Exception{
   for(float angle:new float[]{180,90,0,90,180})bridge.sink.angle(angle,SystemClock.elapsedRealtime(),0);
-  Thread.sleep(250);assertEquals(0,bridge.captures);assertEquals(0,bridge.holds);
+  Thread.sleep(250);assertEquals(0,bridge.captures);assertEquals(0,bridge.moves);
+  // A coarse CLOSED reading may prepare an already-active cover, but must never animate.
+  assertTrue(bridge.holds<=1);
+ }
+ @Test public void closedCoverPreparesAfterAngleReaderRestarts()throws Exception{
+  var mode=context.getSystemService(android.hardware.display.DisplayManager.class).getDisplay(0).getMode();
+  org.junit.Assume.assumeTrue(Math.min(mode.getPhysicalWidth(),mode.getPhysicalHeight())/(float)Math.max(mode.getPhysicalWidth(),mode.getPhysicalHeight())<.7f);
+  bridge.sink.angle(0,SystemClock.elapsedRealtime(),0);
+  waitFor(()->bridge.holds==1);
+  assertEquals("Coarse state prepares the mapping without a made-up animation",0,bridge.captures);
+  assertEquals(0,bridge.moves);
  }
  @Test public void stopWhileWaitingForClosureDoesNotMoveApps()throws Exception{
   bridge.sink.angle(120,SystemClock.elapsedRealtime(),3);Thread.sleep(200);
@@ -100,10 +118,15 @@ public class ServiceLifecycleTest {
   new RestartReceiver().onReceive(context,new Intent(Intent.ACTION_MY_PACKAGE_REPLACED));Thread.sleep(200);
   assertFalse("A user stop must never resurrect itself",MotionService.running);
  }
- @Test public void packageUpdateRestoresOnlyPreviouslyEnabledMonitor()throws Exception{
+ @Test public void packageUpdateRestoresNativeRevealService()throws Exception{
   context.stopService(new Intent(context,MotionService.class));waitFor(()->!MotionService.running);waitFor(()->bridge.sink==null);Thread.sleep(150);
   assertTrue(MotionSettings.enabled(context));BridgeConnection.bridge=bridge;
-  new RestartReceiver().onReceive(context,new Intent(Intent.ACTION_MY_PACKAGE_REPLACED));waitFor(()->MotionService.running&&bridge.sink!=null);
+  int starts=bridge.starts;
+  try{
+   new RestartReceiver().onReceive(context,new Intent(Intent.ACTION_MY_PACKAGE_REPLACED));waitFor(()->RevealService.running);
+   waitFor(()->bridge.starts>starts);
+   assertFalse(MotionService.running);
+  }finally{context.stopService(new Intent(context,RevealService.class));context.stopService(new Intent(context,MotionService.class));waitFor(()->!RevealService.running&&!MotionService.running);}
  }
  private void shell(String command)throws Exception{
   try(InputStream in=new ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().getUiAutomation().executeShellCommand(command))){in.readAllBytes();}

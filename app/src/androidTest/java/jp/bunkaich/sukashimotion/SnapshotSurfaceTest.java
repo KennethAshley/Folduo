@@ -15,6 +15,27 @@ import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class SnapshotSurfaceTest {
     Activity activity;SnapshotSurface root;SnapshotView view;WindowManager overlayWindows;
+    @Test public void attachedFreezeSurvivesTemporaryInvisibility()throws Exception{
+        var instrumentation=InstrumentationRegistry.getInstrumentation();
+        activity=instrumentation.startActivitySync(new Intent(instrumentation.getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        Bitmap original=Bitmap.createBitmap(480,600,Bitmap.Config.ARGB_8888);original.eraseColor(Color.GREEN);
+        FrameTexture frame=FrameTexture.sharp(original);CountDownLatch committed=new CountDownLatch(1);
+        instrumentation.runOnMainSync(()->{
+            view=new SnapshotView(activity,frame,true,false);
+            root=new SnapshotSurface(activity,view,committed::countDown);activity.setContentView(root);
+        });
+        assertTrue(committed.await(3,TimeUnit.SECONDS));SurfaceControl before=root.getSurfaceControl();
+        instrumentation.runOnMainSync(()->root.setVisibility(View.INVISIBLE));instrumentation.waitForIdleSync();
+        assertSame("A temporary display visibility change must not destroy the frozen buffer",before,root.getSurfaceControl());
+        assertTrue(before.isValid());
+        CountDownLatch restored=new CountDownLatch(1);
+        // The child GPU callback precedes its parent's visibility transaction, just
+        // as on first attachment in SnapshotSurface. Wait for that submission too.
+        instrumentation.runOnMainSync(()->{root.setVisibility(View.VISIBLE);view.afterFrame(()->root.post(()->root.postOnAnimation(()->root.postOnAnimation(restored::countDown))));});
+        assertTrue(restored.await(3,TimeUnit.SECONDS));
+        Bitmap screen=instrumentation.getUiAutomation().takeScreenshot();assertNotNull(screen);
+        assertTrue("The retained frame is still green",Color.green(screen.getPixel(screen.getWidth()/2,screen.getHeight()/2))>200);
+    }
     @After public void close(){InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{if(overlayWindows!=null&&root!=null)overlayWindows.removeViewImmediate(root);if(activity!=null)activity.finish();});}
     @Test public void applicationOverlayDoesNotGetDimmedToEightyPercent()throws Exception{
         var instrumentation=InstrumentationRegistry.getInstrumentation();

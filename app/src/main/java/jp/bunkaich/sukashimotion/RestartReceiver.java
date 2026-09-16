@@ -8,7 +8,7 @@ public final class RestartReceiver extends BroadcastReceiver {
         String action=intent.getAction();
         if(!Intent.ACTION_BOOT_COMPLETED.equals(action)&&!Intent.ACTION_MY_PACKAGE_REPLACED.equals(action))return;
         if(!MotionSettings.enabled(context))return;
-        try{context.startForegroundService(new Intent(context,MotionService.class).setAction("restore"));}
+        try{context.startForegroundService(new Intent(context,RevealService.class).setAction("restore"));}
         catch(RuntimeException e){MotionSettings.recovery(context,UiText.of(R.string.restore_deferred));}
     }
 }

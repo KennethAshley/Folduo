@@ -8,6 +8,30 @@ import java.util.*;
 import static org.junit.Assert.*;
 
 public class TaskDisplayRouterTest {
+ @Test public void recentsSelectionKeepsFocusOnTheChosenTaskWhileHomeIsStillReported()throws Exception{
+  Manager m=new Manager();m.all.add(new Info(7,0,2));m.all.add(new Info(31,0,1));
+  new TaskDisplayRouter(m,Manager.class).selectRecent(31,0);
+  assertEquals(31,m.resumed);assertEquals("Never refocus the old Home after starting the selected app",31,m.focused);
+ }
+ @Test public void launcherSelectionKeepsFocusOnTheChosenTaskWhileHomeIsStillReported()throws Exception{
+  Manager m=new Manager();m.all.add(new Info(7,1,2));ComponentName selected=new ComponentName("calculator","calculator.Main");
+  Info app=new Info(31,0,1);app.realActivity=selected;m.all.add(app);
+  new TaskDisplayRouter(m,Manager.class).launchSelected(selected,1,()->{});
+  assertEquals(31,m.resumed);assertEquals(31,m.focused);
+ }
+ public static class Recent {private final List<Info> tasks;Recent(List<Info> tasks){this.tasks=tasks;}public List<Info> getList(){return tasks;}}
+ @Test public void blockedLaunchMovesOnlyTheNamedStandardTaskOnce()throws Exception{
+  Manager m=new Manager();Info other=new Info(10,0,1),chosen=new Info(31,0,1),home=new Info(7,0,2),system=new Info(8,0,3);
+  m.all.addAll(List.of(other,chosen,home,system));TaskDisplayRouter r=new TaskDisplayRouter(m,Manager.class);
+  assertFalse(r.resumeBlockedLaunch(7));assertFalse(r.resumeBlockedLaunch(8));assertFalse(r.resumeBlockedLaunch(99));assertEquals(-1,m.resumed);
+  assertTrue(r.resumeBlockedLaunch(31));assertEquals(31,m.resumed);assertEquals(31,m.focused);assertEquals(1,chosen.displayId);assertEquals(0,other.displayId);
+  m.resumed=-1;assertFalse(r.resumeBlockedLaunch(31));assertEquals(-1,m.resumed);
+ }
+ @Test public void acceptedResumeMustActuallyReachTheInnerDisplay()throws Exception{
+  Manager m=new Manager(){@Override public int startActivityFromRecents(int id,Bundle options){return 0;}};
+  m.all.add(new Info(31,0,1));
+  assertThrows(IllegalStateException.class,()->new TaskDisplayRouter(m,Manager.class).resumeBlockedLaunch(31));
+ }
  public static class WindowConfig {int type;WindowConfig(int t){type=t;}public int getActivityType(){return type;}}
  public static class Config {public WindowConfig windowConfiguration;Config(int t){windowConfiguration=new WindowConfig(t);}}
  public static class Info {
@@ -17,11 +41,13 @@ public class TaskDisplayRouterTest {
  }
  public static class Manager {
   List<Info> all=new ArrayList<>();int resumed=-1,focused=-1;List<String> moves=new ArrayList<>();
+  public Recent getRecentTasks(int count,int flags,int user){return new Recent(all);}
   public List<Info> getTasks(int count,boolean visible,boolean intent,int display){return all.stream().filter(i->i.displayId==display&&i.topActivity!=null).toList();}
   public List<Info> getAllRootTaskInfosOnDisplay(int display){return all.stream().filter(i->i.displayId==display&&i.parentTaskId<0).toList();}
   public void moveTaskToRootTask(int id,int root,boolean top){
    Info task=all.stream().filter(i->i.taskId==id).findFirst().orElseThrow();
    Info destination=all.stream().filter(i->i.taskId==root).findFirst().orElseThrow();
+   if(destination.configuration.windowConfiguration.type!=1)throw new IllegalArgumentException("Cannot move into a HOME root through this API");
    task.parentTaskId=root;task.displayId=destination.displayId;moves.add("child:"+id+":"+root);
   }
   public void moveRootTaskToDisplayOnTopOrBottom(int id,int display,boolean top){
@@ -31,7 +57,7 @@ public class TaskDisplayRouterTest {
   }
   public void setFocusedRootTask(int id){focused=id;}
   public void setFocusedTask(int id){focused=id;}
-  public int startActivityFromRecents(int id,Bundle options){resumed=id;all.stream().filter(i->i.taskId==id).forEach(i->i.displayId=options.getInt("android.activity.launchDisplayId", -1));return 0;}
+  public int startActivityFromRecents(int id,Bundle options){resumed=id;all.stream().filter(i->i.taskId==id).forEach(i->{i.displayId=options.getInt("android.activity.launchDisplayId", -1);if(i.parentTaskId>=0)all.stream().filter(root->root.displayId==i.displayId&&root.parentTaskId<0&&root.configuration.windowConfiguration.type==i.configuration.windowConfiguration.type).findFirst().ifPresent(root->i.parentTaskId=root.taskId);});return 0;}
  }
  @Test public void homeUsesExistingDestinationWithoutMovingAnotherRoot()throws Exception{
   Manager m=new Manager();m.all.add(new Info(7,0,2));m.all.add(new Info(8,1,2));TaskDisplayRouter r=new TaskDisplayRouter(m,Manager.class);
@@ -86,6 +112,6 @@ public class TaskDisplayRouterTest {
   m.all.add(launcher);m.all.add(new Info(7,0,2));m.all.add(new Info(8,1,2));TaskDisplayRouter router=new TaskDisplayRouter(m,Manager.class);
   router.move(0,1,false);assertEquals(1,launcher.displayId);assertEquals(8,launcher.parentTaskId);assertEquals(10,m.focused);
   router.move(1,0,false);assertEquals(0,launcher.displayId);assertEquals(7,launcher.parentTaskId);
-  assertEquals(List.of("child:10:8","child:10:7"),m.moves);
+  assertTrue("HOME transfer uses the platform resume path, not the standard-task-only reparent API",m.moves.isEmpty());
  }
 }

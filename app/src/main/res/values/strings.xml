@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">Folduo</string>
+    <string name="app_name" translatable="false">Folduo Fold8 Test</string>
+    <string name="reveal_intro">The cover and inner-left pane animate oppositely during folding, then reveal the real app. Samsung navigation, your launcher, and separate wallpapers remain available.</string>
+    <string name="source_hardware_log">Samsung hardware log</string>
+    <string name="reveal_ready">Ready · frost during folding</string>
+    <string name="reveal_screen_access">Both screens briefly show an image of the screen you started on, with opposing blur. Images stay in memory and are never saved or sent. Protected captures are skipped.</string>
+    <string name="reveal_preview">Try the reveal on this screen</string>
+    <string name="reveal_recovery">Start Shizuku and enable Folduo from a fully open or closed phone. Screen control is released at the endpoint, on lock or Stop, or after 30 seconds. Disabled Android animations skip the effect.</string>
     <string name="language_title">Language / 言語</string>
     <string name="language_current">Language / 言語: %1$s</string>
     <string name="language_system">System default</string>
@@ -26,16 +32,18 @@
     <string name="sensors_title">Sensor diagnostics</string>
     <string name="probe_sensors">Check sensors for 5 seconds</string>
     <string name="not_measured">No measurements yet</string>
-    <string name="device_note">For Fold7 SM-F966Z · experimental</string>
+    <string name="device_note">Fold8 SM-F971U test build · compatibility checks in progress</string>
     <string name="need_overlay">First, allow display over other apps.</string>
     <string name="need_shizuku">Connect Shizuku first.</string>
-    <string name="unsupported_device">Display control in this build is for Fold7 SM-F966Z. You can still try the preview.</string>
+    <string name="unsupported_device">Display control requires Fold7 SM-F966Z or Fold8 SM-F971U and compatible display modes. You can still try the preview.</string>
     <string name="close_to_prepare">Close the phone fully once to finish setup.</string>
     <string name="probe_running">Checking sensor subscriptions and events… Move the phone gently.</string>
     <string name="nav_recents">Recent apps</string>
     <string name="nav_home">Home</string>
     <string name="nav_back">Back</string>
     <string name="nav_settings">Settings</string>
+    <string name="nav_swipe_bottom">Swipe up for Home. Swipe up and hold for Recent apps.</string>
+    <string name="nav_swipe_side">Swipe inward for Back.</string>
     <string name="no_recent_apps">No recent apps</string>
     <string name="hinge_angle">Hinge angle</string>
     <string name="switch_cover">Switch to cover screen</string>
@@ -68,7 +76,7 @@
     <string name="preparing_connection">Preparing the connection</string>
     <string name="helper_recovery">The helper disconnected. Reconnecting…</string>
     <string name="angle_recovery">Fine angle updates stopped. Restarting the angle reader.</string>
-    <string name="angle_retry">Restarting angle updates. If they do not resume, check the stock interactive wallpaper.</string>
+    <string name="angle_retry">Restarting angle updates. Close the phone fully once if they do not resume.</string>
     <string name="angle_start_failed">Could not start angle updates.</string>
     <string name="angle_retry_error">Retrying angle updates: %1$s</string>
     <string name="coarse_angles">The standard sensor reports three positions. Waiting for fine angle updates.</string>
@@ -121,12 +129,12 @@
     <string name="gyro_result">Dual gyroscopes: %1$s</string>
     <string name="display_result">Display control: %1$s</string>
     <string name="tagline">Your apps, across the fold.</string>
-    <string name="intro">Folduo adds fold animations alongside your existing launcher. As the phone folds, the display moves like frosted glass while the image appears to stay behind it. Close the phone fully once after starting to finish setup. While active, the cover remains the primary display and apps move between the two screens. The held image gives way to the live app when its display is ready.</string>
-    <string name="inner_controls_body">The inner screen has Back, Home, Recent apps and Settings controls at the bottom. Tap a card in Recent apps to switch apps. The bar sits over the app without resizing it and hides during folding. The cover uses Samsung’s normal navigation. The status bar clock and notification icons also hide during transitions. The inner controls are provided by Folduo; they do not restore Samsung’s notification panel or gestures.</string>
+    <string name="intro">The cover and inner-left screen show the same image with opposing, hinge-driven blur. Both remain visible during folding, then give way to the real app at the destination screen’s size. Your launcher and separate wallpapers stay selected.</string>
+    <string name="inner_controls_body">Use Samsung’s normal Home, Back, Recent apps, and notification gestures on both screens. The temporary blur blocks taps until the live app is revealed.</string>
     <string name="setup_body">Start Shizuku using wireless debugging on your phone, then grant Folduo access. Shizuku needs to be started again after a reboot.</string>
     <string name="screen_access_body">While enabled, Folduo temporarily captures other apps during folding and displays the image with angle-dependent parallax and blur. Images are used only in memory and released when a transition ends, the animation stops, or the phone locks. They are never saved or sent anywhere. Protected screens are not captured.</string>
-    <string name="power_body">Both displays stay on while enabled, using more battery. Normal display control resumes when you stop Folduo or lock the phone. Stop any older angle helper before starting. If another process is already controlling the displays, Folduo will show the reason instead of starting.</string>
-    <string name="recovery_body">Folduo normally reconnects automatically. You can also tap Resume in the notification. Unlock the phone and close it fully once. After a reboot, start Shizuku first. If you force-stop Folduo or stop it from Android’s list of active apps, resume it from this screen.</string>
+    <string name="power_body">Both displays stay on during the transition. A short power hold prevents the destination from switching off during the app handoff. Normal screen control resumes afterward; both screens are not kept on while idle.</string>
+    <string name="recovery_body">Keep Shizuku running. After enabling, start from a fully open or closed phone. The effect stops on lock or Stop, with a 30-second folding limit. After a reboot, start Shizuku again. If Android stops Folduo, enable it here.</string>
     <string name="battery_body">Set battery use to “Unrestricted” for Folduo and Shizuku to reduce background interruptions. Screen capture and fold animations pause while the screen is off.</string>
     <string name="sensors_body">This check subscribes to the gyroscopes on each side separately and reports permissions and received events. Both sensors may not be available. This diagnostic does not capture your screen.</string>
     <string name="preview_degrees">%1$s preview · %2$d°\n%3$s</string>
@@ -145,7 +153,7 @@
     <string name="err_monitor_inactive">Fold monitoring is not active.</string>
     <string name="err_inner_unavailable">Inner screen controls are unavailable.</string>
     <string name="err_unsupported_action">This action is not supported.</string>
-    <string name="err_wrong_model">This build targets Fold7 SM-F966Z</string>
+    <string name="err_wrong_model">This build supports Fold7 SM-F966Z and Fold8 SM-F971U only</string>
     <string name="err_states_unavailable">Concurrent display states unavailable</string>
     <string name="err_unexpected_caller">Unexpected caller</string>
     <string name="err_angle_stopped">Angle session stopped</string>

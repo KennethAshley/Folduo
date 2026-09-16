@@ -17,6 +17,12 @@ public class RenderTest {
   return render(inner,angle,source,linked,false);
  }
  private Bitmap render(boolean inner,float angle,Bitmap source,Bitmap linked,boolean physical)throws Exception{
+  return render(inner,angle,source,linked,physical,false);
+ }
+ private Bitmap render(boolean inner,float angle,Bitmap source,Bitmap linked,boolean physical,boolean flat)throws Exception{
+  return render(inner,angle,source,linked,physical,flat,view->{});
+ }
+ private Bitmap render(boolean inner,float angle,Bitmap source,Bitmap linked,boolean physical,boolean flat,java.util.function.Consumer<SnapshotView> configure)throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
   android.content.res.Configuration config=new android.content.res.Configuration(context.getResources().getConfiguration());config.densityDpi=160;
   Context renderContext=context.createConfigurationContext(config);
@@ -25,7 +31,8 @@ public class RenderTest {
   android.media.ImageReader reader=android.media.ImageReader.newInstance(640,720,PixelFormat.RGBA_8888,2,android.hardware.HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE|android.hardware.HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
   HardwareRenderer renderer=new HardwareRenderer();renderer.setSurface(reader.getSurface());
   InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
-   SnapshotView view=new SnapshotView(renderContext,frame,inner,false);view.layout(0,0,640,720);if(rear!=null)view.setRearFrame(rear,false);view.setAngle(angle);
+   SnapshotView view=new SnapshotView(renderContext,frame,inner,false);view.flatProjection=flat;view.layout(0,0,640,720);if(rear!=null)view.setRearFrame(rear,false);view.setAngle(angle);
+   configure.accept(view);
    RenderNode node=new RenderNode("fold-test");node.setPosition(0,0,640,720);Canvas c=node.beginRecording();
    if(physical){
     c.drawColor(Color.BLACK);c.save();c.clipRect(320,0,640,720);view.draw(c);c.restore();
@@ -44,6 +51,23 @@ public class RenderTest {
   android.hardware.HardwareBuffer buffer=image.getHardwareBuffer();
   Bitmap result=Bitmap.wrapHardwareBuffer(buffer,ColorSpace.get(ColorSpace.Named.SRGB)).copy(Bitmap.Config.ARGB_8888,false);
   buffer.close();image.close();renderer.destroy();reader.close();return result;
+ }
+ @Test public void pairedBlurKeepsBothAxesAligned()throws Exception{
+  Bitmap gradient=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);
+  for(int x=0;x<640;x++)for(int y=0;y<720;y++)gradient.setPixel(x,y,Color.rgb(Math.round(x*255f/640),Math.round(y*255f/720),80));
+  for(boolean inner:new boolean[]{false,true})for(float angle:new float[]{30,90,150}){
+   Bitmap result=render(inner,angle,gradient,null,false,true);
+   for(int x=100;x<540;x+=40)for(int y=140;y<580;y+=40){
+    assertEquals("Paired image keeps x at "+angle,x*255f/640,Color.red(result.getPixel(x,y)),3);
+    assertEquals("Paired image keeps y at "+angle,y*255f/720,Color.green(result.getPixel(x,y)),3);
+   }
+   result.recycle();
+  }
+  for(boolean inner:new boolean[]{false,true}){
+   Bitmap blurred=render(inner,90,horizontalEdge(),null,false,true);
+   assertTrue("Flattening perspective must retain visible blur",edgeSigma(blurred,inner?40:480)>10);
+   blurred.recycle();
+  }
  }
  @Test public void rightPaneRemainsPixelIdentical()throws Exception{
   Bitmap open=render(true,180),folded=render(true,95);long difference=0;
@@ -163,6 +187,34 @@ public class RenderTest {
   assertTrue(cover.prepared&&inner.prepared);
   assertEquals(Color.BLUE,cover.sharp.getPixel(160,360));assertEquals(Color.BLUE,inner.sharp.getPixel(100,360));assertEquals(Color.BLUE,inner.sharp.getPixel(540,360));
   for(Bitmap level:inner.levels){int pixel=level.getPixel(level.getWidth()/4,level.getHeight()/2);assertTrue("Cropped right image remains blue after blur",Color.blue(pixel)>240&&Color.red(pixel)<15);}
+  FrameTexture pairedCover=original.transfer(true,320,720,true);
+  assertEquals("Paired cover follows the inner LEFT pane",Color.RED,pairedCover.sharp.getPixel(160,360));
+  for(Bitmap level:pairedCover.levels){int pixel=level.getPixel(level.getWidth()/2,level.getHeight()/2);assertTrue(Color.red(pixel)>240&&Color.blue(pixel)<15);}
+ }
+ @Test public void closingCoverPreservesProportionsWithoutEmptyBorders(){
+  Bitmap source=Bitmap.createBitmap(800,600,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(source);canvas.drawColor(Color.BLUE);
+  Paint paint=new Paint();paint.setColor(Color.WHITE);canvas.drawCircle(200,300,60,paint);
+  FrameTexture cover=FrameTexture.prepare(source,1,()->false).transfer(true,200,600,true);
+  int horizontal=0,vertical=0;
+  for(int x=0;x<200;x++)if(Color.red(cover.sharp.getPixel(x,300))>128)horizontal++;
+  for(int y=0;y<600;y++)if(Color.red(cover.sharp.getPixel(100,y))>128)vertical++;
+  assertEquals("A circle stays round when mapped onto the narrow cover",vertical,horizontal,2);
+  for(int y=0;y<600;y+=20)for(int x:new int[]{0,199})assertEquals("No empty black/transparent border",Color.BLUE,cover.sharp.getPixel(x,y));
+ }
+ @Test public void closingLayoutBlendsUnderBlurThenRevealsTheCorrectImage()throws Exception{
+  Bitmap old=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888),next=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);
+  old.eraseColor(Color.RED);next.eraseColor(Color.BLUE);FrameTexture destination=FrameTexture.prepare(next,1,()->false);
+  for(float mix:new float[]{0,.25f,.5f,.75f,1}){
+   Bitmap image=render(false,0,old,null,false,true,view->{view.setBlurFloor(28);view.setLayoutBlend(destination,mix);});
+   int color=image.getPixel(320,360);assertEquals(255*(1-mix),Color.red(color),2);assertEquals(255*mix,Color.blue(color),2);assertEquals(255,Color.alpha(color));image.recycle();
+  }
+  for(int y=0;y<720;y++)for(int x=0;x<640;x++){old.setPixel(x,y,x/8%2==0?Color.WHITE:Color.BLACK);next.setPixel(x,y,y/8%2==0?Color.WHITE:Color.BLACK);}
+  FrameTexture detailed=FrameTexture.prepare(next,1,()->false);
+  Bitmap masked=render(false,0,old,null,false,true,view->{view.setBlurFloor(28);view.setLayoutBlend(detailed,.5f);});
+  int low=255,high=0;for(int x=100;x<540;x+=3)for(int y=140;y<580;y+=3){int color=masked.getPixel(x,y);low=Math.min(low,Color.red(color));high=Math.max(high,Color.red(color));assertEquals(255,Color.alpha(color));}
+  assertTrue("Both layouts lose sharp detail during the exchange",high-low<20);masked.recycle();
+  Bitmap clear=render(false,0,old,null,false,true,view->{view.setBlurFloor(0);view.setLayoutBlend(detailed,1);});
+  for(int x=100;x<540;x+=13)for(int y=140;y<580;y+=13)assertTrue("Final frame is the full-width destination",distance(next.getPixel(x,y),clear.getPixel(x,y))<=6);clear.recycle();
  }
  @Test public void saveCalibratedRenderingSamples()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();

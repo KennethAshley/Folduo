@@ -8,6 +8,8 @@ final class SnapshotSurface extends SurfaceView implements SurfaceHolder.Callbac
     final SnapshotView image;private SurfaceControlViewHost host;private final Runnable committed;
     SnapshotSurface(Context context,SnapshotView image,Runnable committed){
         super(context);this.image=image;this.committed=committed;
+        // Logical OFF during a panel swap must not discard the still-visible frozen buffer.
+        if(android.os.Build.VERSION.SDK_INT>=34)setSurfaceLifecycle(SURFACE_LIFECYCLE_FOLLOWS_ATTACHMENT);
         setZOrderOnTop(true);getHolder().setFormat(android.graphics.PixelFormat.TRANSLUCENT);
         getHolder().addCallback(this);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
         setOnTouchListener((v,event)->true);

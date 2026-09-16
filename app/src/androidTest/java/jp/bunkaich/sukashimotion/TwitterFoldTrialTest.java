@@ -99,7 +99,7 @@ public class TwitterFoldTrialTest {
             instrumentation.runOnMainSync(()->android.widget.Toast.makeText(setup,"Close fully and unlock, then tap Start.",android.widget.Toast.LENGTH_LONG).show());
           }
         }
-        context.startForegroundService(new Intent(context,MotionService.class).setAction("start").putExtra("duo_trial",true));
+        context.startForegroundService(new Intent(context,MotionService.class).setAction("start"));
         Class<?> at=Class.forName("android.app.ActivityThread");Object thread=at.getMethod("currentActivityThread").invoke(null);
         var services=at.getDeclaredField("mServices");services.setAccessible(true);
         await("Trial service started",5000,()->{
@@ -108,7 +108,7 @@ public class TwitterFoldTrialTest {
         });
         if(probe){Thread.sleep(350);angle(0);}
         await("Both screens and app mirror ready",15000,()->{healthy();return flag("layoutPrepared")&&flag("mirrorReady");});
-        assertTrue("Use the accepted Duo renderer",flag("duoTrial"));
+        assertTrue("Use the accepted Duo renderer",flag("duoEffect"));
         if(probe){
             instrumentation.runOnMainSync(()->setup.setContentView(new android.view.View(setup){
                 @Override protected void onDraw(android.graphics.Canvas canvas){canvas.drawColor(getWidth()>getHeight()?android.graphics.Color.BLUE:android.graphics.Color.RED);}

@@ -18,5 +18,5 @@ captures/
 *.log
 tools/cover-wallpaper-setup.jar
 __pycache__/
-# Pinned external shader; see THIRD_PARTY_NOTICES.md for retrieval and checksum.
+# Obsolete external shader from earlier local trials; preBuild rejects it.
 app/src/main/res/raw/duo_fold.agsl

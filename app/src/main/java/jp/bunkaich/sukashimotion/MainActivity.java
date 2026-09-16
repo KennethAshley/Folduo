@@ -13,7 +13,8 @@ import java.util.ArrayList;
 import rikka.shizuku.Shizuku;
 
 public final class MainActivity extends Activity {
-    private final Handler handler=new Handler();private TextView state;
+    private final Handler handler=new Handler();private TextView state;private Button start,stop;
+    private final ArrayList<Runnable> tuningLabels=new ArrayList<>();
     private final Shizuku.OnRequestPermissionResultListener permission=(code,result)->{if(result==0)BridgeConnection.connect(this);};
     @Override public void onCreate(Bundle saved){
         super.onCreate(saved);BridgeConnection.init(this);Shizuku.addRequestPermissionResultListener(permission);
@@ -25,6 +26,15 @@ public final class MainActivity extends Activity {
         label(page,getString(R.string.tagline),17,0xffb3eed4);
         label(page,getString(R.string.intro),15,0xffc5d3cd);
         state=label(page,"",15,0xffb3eed4);
+        label(page,getString(R.string.screen_access_body),14,0xffc5d3cd);
+        start=button(page,getString(R.string.enable_animation),()->startMotion("start"));start.setId(R.id.start_animation);
+        stop=button(page,getString(R.string.stop),()->{MotionSettings.setEnabled(this,false);stopService(new Intent(this,MotionService.class));stopService(new Intent(this,RevealService.class));if(!MotionService.running&&!RevealService.running)BridgeConnection.disconnect();});stop.setId(R.id.stop_animation);
+        label(page,getString(R.string.animation_settings),21,Color.WHITE);
+        label(page,getString(R.string.animation_settings_body),14,0xffc5d3cd);
+        tuningButton(page,"blur",R.id.blur_setting,R.string.blur_strength,R.string.blur_body,R.string.blur_light,R.string.tuning_default,R.string.blur_strong);
+        tuningButton(page,"response",R.id.response_setting,R.string.responsiveness,R.string.response_body,R.string.response_quick,R.string.tuning_default,R.string.response_smooth);
+        tuningButton(page,"fade",R.id.fade_setting,R.string.outer_fade,R.string.fade_body,R.string.fade_earlier,R.string.tuning_default,R.string.fade_later);
+        button(page,getString(R.string.reset_tuning),()->{MotionSettings.resetTuning(this);for(Runnable refresh:tuningLabels)refresh.run();}).setId(R.id.reset_animation_settings);
         label(page,getString(R.string.inner_controls_title),21,Color.WHITE);
         label(page,getString(R.string.inner_controls_body),14,0xffc5d3cd);
         label(page,getString(R.string.setup_title),21,Color.WHITE);
@@ -35,12 +45,7 @@ public final class MainActivity extends Activity {
             if(BridgeConnection.permitted())BridgeConnection.connect(this);else Shizuku.requestPermission(7);
         });
         button(page,getString(R.string.allow_overlay),()->startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName()))));
-        label(page,getString(R.string.screen_access_title),21,Color.WHITE);
-        label(page,getString(R.string.screen_access_body),14,0xffc5d3cd);
         label(page,getString(R.string.power_body),14,0xffc5d3cd);
-        button(page,MotionSettings.enabled(this)?getString(R.string.resume_animation):getString(R.string.enable_animation),()->startMotion("start"));
-        button(page,getString(R.string.preview),()->startActivity(new Intent(this,PreviewActivity.class)));
-        button(page,getString(R.string.stop),()->{MotionSettings.setEnabled(this,false);stopService(new Intent(this,MotionService.class));stopService(new Intent(this,RevealService.class));if(!MotionService.running&&!RevealService.running)BridgeConnection.disconnect();});
         label(page,getString(R.string.recovery_title),21,Color.WHITE);
         label(page,getString(R.string.recovery_body),14,0xffc5d3cd);
         label(page,getString(R.string.battery_body),14,0xffc5d3cd);
@@ -52,8 +57,7 @@ public final class MainActivity extends Activity {
         if(!BridgeConnection.permitted()){Toast.makeText(this,getString(R.string.need_shizuku),Toast.LENGTH_LONG).show();return;}
         if(!DeviceSupport.supports(Build.MODEL)){Toast.makeText(this,getString(R.string.unsupported_device),Toast.LENGTH_LONG).show();return;}
         if(checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},8);
-        stopService(new Intent(this,MotionService.class));
-        BridgeConnection.connect(this);MotionSettings.setEnabled(this,true);startForegroundService(new Intent(this,RevealService.class).setAction(action));
+        BridgeConnection.connect(this);MotionSettings.setEnabled(this,true);startForegroundService(new Intent(this,MotionService.class).setAction(action));
     }
     static String formatReport(Context c,Bundle b){
         StringBuilder text=new StringBuilder(c.getString(R.string.probe_permissions,b.getInt("uid"),c.getString(b.getBoolean("samsungPermission")?R.string.yes:R.string.no)));
@@ -86,11 +90,22 @@ public final class MainActivity extends Activity {
     private final Runnable refresh=new Runnable(){public void run(){
         String status=RevealService.running?RevealService.status.resolve(MainActivity.this):MotionService.running?MotionService.status.resolve(MainActivity.this):getString(R.string.state_stopped,BridgeConnection.status.resolve(MainActivity.this));
         state.setText(getString(R.string.state_details,status,getString(MotionSettings.enabled(MainActivity.this)?R.string.on:R.string.off),getString(Settings.canDrawOverlays(MainActivity.this)?R.string.allowed:R.string.not_allowed)));
+        start.setEnabled(!MotionService.running);stop.setEnabled(MotionSettings.enabled(MainActivity.this)||MotionService.running||RevealService.running);
         handler.postDelayed(this,400);
     }};
-    @Override protected void onResume(){super.onResume();if(MotionSettings.enabled(this)&&!RevealService.running&&!MotionService.running&&Settings.canDrawOverlays(this))startForegroundService(new Intent(this,RevealService.class).setAction("restore"));}
+    @Override protected void onResume(){super.onResume();if(MotionSettings.enabled(this)&&!MotionService.running&&Settings.canDrawOverlays(this))startForegroundService(new Intent(this,MotionService.class).setAction("restore"));}
     private int dp(int x){return Math.round(x*getResources().getDisplayMetrics().density);}
+    private void tuningButton(LinearLayout page,String key,int id,int title,int description,int...options){
+        String[] names=new String[options.length];for(int i=0;i<options.length;i++)names[i]=getString(options[i]);
+        Button b=button(page,"",()->{});b.setId(id);
+        Runnable refresh=()->b.setText(getString(R.string.tuning_value,getString(title),names[MotionSettings.preset(this,key)]));
+        tuningLabels.add(refresh);refresh.run();
+        b.setOnClickListener(v->new AlertDialog.Builder(this).setTitle(title)
+            .setSingleChoiceItems(names,MotionSettings.preset(this,key),(dialog,choice)->{MotionSettings.preset(this,key,choice);refresh.run();dialog.dismiss();})
+            .setNegativeButton(R.string.close,null).show());
+        label(page,getString(description),14,0xffc5d3cd);
+    }
     private TextView label(LinearLayout parent,String text,int size,int color){TextView v=new TextView(this);v.setText(text);v.setTextSize(size);v.setTextColor(color);v.setPadding(0,dp(10),0,dp(10));v.setLineSpacing(dp(3),1);parent.addView(v);return v;}
-    private void button(LinearLayout parent,String title,Runnable action){Button b=new Button(this);b.setText(title);b.setAllCaps(false);b.setOnClickListener(v->action.run());parent.addView(b,new LinearLayout.LayoutParams(-1,-2));}
+    private Button button(LinearLayout parent,String title,Runnable action){Button b=new Button(this);b.setText(title);b.setAllCaps(false);b.setOnClickListener(v->action.run());parent.addView(b,new LinearLayout.LayoutParams(-1,-2));return b;}
     @Override protected void onDestroy(){handler.removeCallbacks(refresh);Shizuku.removeRequestPermissionResultListener(permission);super.onDestroy();}
 }

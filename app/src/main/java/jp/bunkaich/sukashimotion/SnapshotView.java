@@ -9,7 +9,7 @@ final class SnapshotView extends View {
     final RuntimeShader shader=new RuntimeShader(FoldShader.CODE);final Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG);
     FrameTexture frame;boolean inner;final boolean leftOnly;
     int logicalWidth;boolean flatProjection,duoEffect; private float angle;private FrameTexture rearFrame;private long rearSince;private boolean sharpHold;
-    private float blurFloor,layoutBlend=-1,layoutMask;
+    private float blurFloor,layoutBlend=-1,layoutMask,blurStrength=1;
     private RenderNode layoutNode;
     private final Paint holdPaint=new Paint(Paint.FILTER_BITMAP_FLAG);
     private DuoSnapshotRenderer duoRenderer;
@@ -39,6 +39,11 @@ final class SnapshotView extends View {
     }
     void setFrame(FrameTexture next){frame=next;if(duoEffect){rearFrame=null;layoutBlend=-1;}bindTextures();invalidate();}
     void setBlurFloor(float radius){blurFloor=Math.max(0,Math.min(60,radius));invalidate();}
+    void setBlurStrength(float strength){
+        float next=Float.isFinite(strength)?Math.max(.5f,Math.min(1.5f,strength)):1;
+        if(blurStrength==next)return;blurStrength=next;
+        if(duoRenderer!=null)duoRenderer.setBlurStrength(next);invalidate();
+    }
     void setLayoutMask(float amount){
         float next=Math.max(0,Math.min(1,amount));if(layoutMask==next)return;layoutMask=next;
         if(layoutNode==null)layoutNode=new RenderNode("destination preparation frost");
@@ -67,7 +72,7 @@ final class SnapshotView extends View {
     @Override protected void onDraw(Canvas canvas){
         if(sharpHold||!frame.prepared&&!duoEffect){canvas.drawColor(Color.BLACK);canvas.drawBitmap(frame.sharp,null,new Rect(0,0,getWidth(),getHeight()),holdPaint);return;}
         if(duoEffect){
-            if(duoRenderer==null)duoRenderer=new DuoSnapshotRenderer(getContext(),inner);
+            if(duoRenderer==null){duoRenderer=new DuoSnapshotRenderer(getContext(),inner);duoRenderer.setBlurStrength(blurStrength);}
             Canvas target=canvas;
             if(layoutMask>0){layoutNode.setPosition(0,0,getWidth(),getHeight());target=layoutNode.beginRecording();}
             duoRenderer.draw(target,frame.sharp,layoutBlend>=0&&rearFrame!=null?rearFrame.sharp:null,layoutBlend,getWidth(),getHeight(),angle);

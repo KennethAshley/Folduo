@@ -291,6 +291,67 @@ public class RenderTest {
   assertEquals(1,homes.size());
   assertEquals(HomeActivity.class.getName(),homes.get(0).activityInfo.name);
  }
+ @Test public void blurStrengthChangesFrostButKeepsTheLiveEndpointsAndRightPane()throws Exception{
+  Bitmap pattern=PreviewActivity.sample(640,720);
+  Bitmap light=render(true,125,pattern,null,false,false,v->{v.duoEffect=true;v.setBlurStrength(.65f);});
+  Bitmap strong=render(true,125,pattern,null,false,false,v->{v.duoEffect=true;v.setBlurStrength(1.35f);});
+  long changed=0;
+  for(int x=15;x<300;x+=7)for(int y=15;y<705;y+=13)changed+=distance(light.getPixel(x,y),strong.getPixel(x,y));
+  assertTrue("Blur strength must affect actual GPU pixels",changed>1000);
+  for(float strength:new float[]{.65f,1.35f})for(boolean inside:new boolean[]{true,false}){
+   Bitmap clear=render(inside,inside?180:0,pattern,null,false,false,v->{v.duoEffect=true;v.setBlurStrength(strength);});
+   for(int x=15;x<630;x+=19)for(int y=15;y<705;y+=23){
+    assertTrue("Tuning must leave endpoint content clear",distance(pattern.getPixel(x,y),clear.getPixel(x,y))<=3);
+    if(x>325)assertEquals("Blur strength must leave the inner right pane unchanged",light.getPixel(x,y),strong.getPixel(x,y));
+   }
+   clear.recycle();
+  }
+  light.recycle();strong.recycle();pattern.recycle();
+ }
+ @Test public void glassFrostSoftensFinePatternsWithoutSpeckles()throws Exception{
+  Bitmap stripes=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);
+  for(int y=0;y<720;y++)for(int x=0;x<640;x++)stripes.setPixel(x,y,(y/2)%2==0?Color.WHITE:Color.BLACK);
+  for(boolean inside:new boolean[]{true,false})for(float angle:new float[]{60,90,120}){
+   Bitmap result=render(inside,angle,stripes,null,false,false,v->v.duoEffect=true);
+   int x=inside?40:560,low=255,high=0;
+   for(int y=220;y<500;y++){int value=Color.red(result.getPixel(x,y));low=Math.min(low,value);high=Math.max(high,value);}
+   assertTrue("Fine detail must soften evenly through glass, inner="+inside+", angle="+angle+", contrast="+(high-low),high-low<=8);
+   result.recycle();
+  }
+  stripes.recycle();
+ }
+ @Test public void glassReversalsReuseTheSameFrameAtFullPanelSize()throws Exception{
+  Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
+  int w=2448,h=1848;Bitmap source=PreviewActivity.sample(w,h);
+  var reader=android.media.ImageReader.newInstance(w,h,PixelFormat.RGBA_8888,2,android.hardware.HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE|android.hardware.HardwareBuffer.USAGE_GPU_COLOR_OUTPUT);
+  HardwareRenderer renderer=new HardwareRenderer();renderer.setSurface(reader.getSurface());
+  RenderNode node=new RenderNode("glass-reversal");node.setPosition(0,0,w,h);renderer.setContentRoot(node);
+  java.util.Map<String,int[]> seen=new java.util.HashMap<>();StringBuilder timing=new StringBuilder("inner,cycle,angle,submit_and_present_ms\n");
+  try{
+   for(boolean inside:new boolean[]{true,false}){
+    DuoSnapshotRenderer glass=new DuoSnapshotRenderer(context,inside);
+    for(int cycle=0;cycle<2;cycle++)for(int angle:new int[]{0,30,60,90,120,150,180,150,120,90,60,30,0}){
+     long start=System.nanoTime();
+     InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
+      Canvas canvas=node.beginRecording();glass.draw(canvas,source,null,0,w,h,angle);node.endRecording();
+      renderer.createRenderRequest().setWaitForPresent(true).syncAndDraw();
+     });
+     timing.append(inside).append(',').append(cycle).append(',').append(angle).append(',').append((System.nanoTime()-start)/1e6).append('\n');
+     android.media.Image image=null;for(int i=0;i<50&&image==null;i++){image=reader.acquireLatestImage();if(image==null)Thread.sleep(10);}
+     assertNotNull(image);var buffer=image.getHardwareBuffer();
+     Bitmap frame=Bitmap.wrapHardwareBuffer(buffer,ColorSpace.get(ColorSpace.Named.SRGB)).copy(Bitmap.Config.ARGB_8888,false);
+     buffer.close();image.close();
+     int[] samples=new int[200];int n=0;
+     for(int y=50;y<h&&n<samples.length;y+=150)for(int x=50;x<w&&n<samples.length;x+=150)samples[n++]=frame.getPixel(x,y);
+     String key=inside+"-"+angle;
+     if(seen.containsKey(key))assertArrayEquals("Reversing the hinge must return to the same pixels: "+key,seen.get(key),samples);else seen.put(key,samples);
+     if(cycle==0&&(angle==60||angle==120||angle==180))try(var out=new java.io.FileOutputStream(new java.io.File(context.getExternalFilesDir(null),"glass-"+key+".png"))){frame.compress(Bitmap.CompressFormat.PNG,100,out);}
+     frame.recycle();
+    }
+   }
+  }finally{renderer.destroy();reader.close();source.recycle();}
+  try(var out=new java.io.FileOutputStream(new java.io.File(context.getExternalFilesDir(null),"glass-frame-times.csv"))){out.write(timing.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+ }
  @Test public void duoAppSnapshotKeepsEndpointsAndRightPaneSharpWithOppositeDepth()throws Exception{
   Bitmap white=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);white.eraseColor(Color.WHITE);
   Bitmap cover=render(false,90,white,null,false,false,v->v.duoEffect=true);

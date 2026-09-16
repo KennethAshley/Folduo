@@ -7,8 +7,8 @@ android {
   applicationId = "jp.bunkaich.sukashimotion"
   minSdk = 33
   targetSdk = 36
-  versionCode = 74
-  versionName = "0.1.27-fold8.33"
+  versionCode = 77
+  versionName = "0.1.27-fold8.36"
   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
  }
  buildFeatures { buildConfig = true; aidl = true }
@@ -32,4 +32,11 @@ val licenseAssets = tasks.register<Sync>("prepareLicenseAssets") {
  into(layout.buildDirectory.dir("generated/licenseAssets/licenses"))
 }
 android.sourceSets.getByName("main").assets.directories.add(layout.buildDirectory.dir("generated/licenseAssets").get().asFile.path)
-tasks.named("preBuild").configure { dependsOn(licenseAssets) }
+tasks.named("preBuild").configure {
+ dependsOn(licenseAssets)
+ doFirst {
+  check(!file("src/main/res/raw/duo_fold.agsl").exists()) {
+   "Remove obsolete src/main/res/raw/duo_fold.agsl; the original glass renderer is now built in."
+  }
+ }
+}

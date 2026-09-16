@@ -26,7 +26,9 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private volatile int generation,sessionSerial;private volatile boolean stopped;private boolean paused=true,busy,frameScheduled,blockedUntilEndpoint,finishing;private String panelSignature="";
     private long angleStartedAt,angleSession,retryAt;private int recoveries;private UiText lastRecovery=UiText.raw("");private String notificationText="";
     private boolean layoutPrepared,layoutPreparing,layoutRecovering,fixedPrimaryInner;
-    private boolean duoTrial;
+    // The accepted GPU renderer is also used by notification, restore, and release builds.
+    private final boolean duoEffect=true;
+    private float blurStrength=1,responseSeconds=.024f,outerFadeStart=45;
     private float outerDarkness;private boolean outerFollowsHinge,outerPortraitReady=true;
     private int outerCommandGeneration=-1;private Runnable afterOuterBlack;
     private IShellBridge bound;private FoldPolicy policy;private float target=Float.NaN,smoothed=Float.NaN;
@@ -56,7 +58,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
     }
     @Override public IBinder onBind(Intent intent){return null;}
     @Override public void onCreate(){
-        super.onCreate();uiLocales=getResources().getConfiguration().getLocales();running=true;status=UiText.of(R.string.preparing);
+        super.onCreate();stopService(new Intent(this,RevealService.class));uiLocales=getResources().getConfiguration().getLocales();running=true;status=UiText.of(R.string.preparing);
         NotificationManager nm=getSystemService(NotificationManager.class);nm.createNotificationChannel(new NotificationChannel("motion",getString(R.string.notification_channel),NotificationManager.IMPORTANCE_LOW));
         startForeground(7,notification(getString(R.string.starting)));
         displays=getSystemService(DisplayManager.class);displays.registerDisplayListener(this,main);
@@ -77,7 +79,6 @@ public final class MotionService extends Service implements DisplayManager.Displ
         String action=intent==null?"restore":intent.getAction();
         if("stop".equals(action)){MotionSettings.setEnabled(this,false);stopSelf();return START_NOT_STICKY;}
         if("restore".equals(action)&&!MotionSettings.enabled(this)){stopSelf();return START_NOT_STICKY;}
-        duoTrial=BuildConfig.DEBUG&&intent!=null&&intent.getBooleanExtra("duo_trial",false);
         MotionSettings.setEnabled(this,true);MotionSettings.recovery(this,"");
         if("restart".equals(action)){pause();recordRecovery(UiText.of(R.string.manual_restart));}
         resume();return START_STICKY;
@@ -126,6 +127,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
             controls.execute(()->{try{Bundle state=bridge.inspect();main.post(()->{checkingMirror=false;if(session==sessionSerial&&!state.getBoolean("mirrorActive"))fail(UiText.raw("Inner workspace stopped: "+state.getString("mirrorError","")));});}catch(Exception e){main.post(()->{checkingMirror=false;if(session==sessionSerial)fail(UiText.error(e));});}});
         }
         if(!paused&&!layoutPrepared&&!layoutPreparing&&source>=0&&Float.isFinite(target))prepareIfClosed();
+        if(!busy&&!finishing&&(policy==null||!policy.active))refreshTuning();
         warmInner();
         if(!paused&&layoutPrepared&&policy!=null&&policy.active&&Float.isFinite(target))handle(policy.update(target,SystemClock.elapsedRealtime(),source==HardwareAngle.SOURCE));
         updateNavigation();updateNotification();main.postDelayed(this,100);
@@ -198,7 +200,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
                             Bundle started=bridge.mirror(surface,parent,inner.w,inner.h,local.getResources().getDisplayMetrics().densityDpi);
                             if(!started.getBoolean("ok"))throw new IllegalStateException(started.getString("error"));
                             main.post(()->{if(stopped||session!=sessionSerial)return;mirrorReady=true;policy=new FoldPolicy(false);
-                                if(duoTrial)warmInner();else{layoutPrepared=true;layoutPreparing=false;trace("stable-mirror-ready");}
+                                if(duoEffect)warmInner();else{layoutPrepared=true;layoutPreparing=false;trace("stable-mirror-ready");}
                             });
                         }catch(Exception e){main.post(()->{if(session==sessionSerial)fail(UiText.error(e));});}
                     }),error->{if(session==sessionSerial)fail(UiText.error(error));});
@@ -207,7 +209,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.error(e));});}});
     }
     private void warmInner(){
-        if(!duoTrial||stopped||paused||workspace==null||!mirrorReady||policy==null||policy.open||policy.active||busy||finishing||warmingTicket==generation)return;
+        if(!duoEffect||stopped||paused||workspace==null||!mirrorReady||policy==null||policy.open||policy.active||busy||finishing||warmingTicket==generation)return;
         // ponytail: refresh the fully frosted, hidden inner frame at 4 fps; a live
         // texture renderer would avoid periodic captures if power measurements require it.
         long now=SystemClock.elapsedRealtime();if(now-warmedAt<250)return;warmedAt=now;
@@ -250,6 +252,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         switch(change){case OPEN -> transition(true);case CLOSE -> transition(false);case FINISH_OPEN,FINISH_CLOSED -> finish();default -> {}}
     }
     private void transition(boolean opening){
+        if(!busy&&!finishing&&layers.isEmpty())refreshTuning();
         removeNavigation();
         int ticket=++generation;busy=true;finishing=false;for(Layer layer:layers){layer.root.animate().cancel();layer.root.setAlpha(1);}
         afterOuterBlack=null;
@@ -276,11 +279,11 @@ public final class MotionService extends Service implements DisplayManager.Displ
                 FrameTexture frame=cached;
                 if(frame==null){Bundle result=bridge.captureBehind(displayId,exclude);Bitmap bitmap=result.getParcelable("frame",Bitmap.class);if(bitmap==null)throw new IllegalStateException(result.getString("error","@folduo/capture_failed"));frame=FrameTexture.sharp(bitmap);}
                 FrameTexture ready=frame;
-                if(!duoTrial&&!frame.prepared)main.post(()->{
+                if(!duoEffect&&!frame.prepared)main.post(()->{
                     if(ticket!=generation||stopped)return;
                     addLayer(outgoing,ready,true,false,ticket,()->trace("source-frame-committed"));
                 });
-                FrameTexture texture=duoTrial||frame.prepared?frame:FrameTexture.prepare(frame.sharp,density,()->stopped||ticket!=generation);
+                FrameTexture texture=duoEffect||frame.prepared?frame:FrameTexture.prepare(frame.sharp,density,()->stopped||ticket!=generation);
                 main.post(()->{
                     if(ticket!=generation||stopped||texture==null)return;frozen.put(outgoingInner,texture);
                     // Duo blurs on the GPU; only the legacy renderer needs CPU levels.
@@ -303,8 +306,8 @@ public final class MotionService extends Service implements DisplayManager.Displ
             main.postDelayed(()->requestDisplays(ticket,opening,attempt+1),40);return;
         }
         FrameTexture cached=frozen.get(opening),outgoing=frozen.get(!opening);
-        if(outgoing==null||!duoTrial&&!outgoing.prepared){fail(UiText.of(R.string.blur_unconfirmed));return;}
-        if(duoTrial&&!opening&&!outerPortraitReady&&outerDarkness==1){
+        if(outgoing==null||!duoEffect&&!outgoing.prepared){fail(UiText.of(R.string.blur_unconfirmed));return;}
+        if(duoEffect&&!opening&&!outerPortraitReady&&outerDarkness==1){
             // The native black layer already covers this destination. Reuse it
             // instead of building a placeholder that cannot be seen underneath.
             outerFollowsHinge=true;
@@ -315,14 +318,14 @@ public final class MotionService extends Service implements DisplayManager.Displ
         }
         // Resizing display 0 also letterboxes its physical cover. Wait for hinge-driven
         // black coverage while preparing the arriving inner frame in parallel.
-        boolean[] covered={false,!duoTrial||!opening};
+        boolean[] covered={false,!duoEffect||!opening};
         Runnable move=()->{
             if(stopped||ticket!=generation||!covered[0]||!covered[1])return;
-            if(duoTrial&&opening)outerPortraitReady=false;
+            if(duoEffect&&opening)outerPortraitReady=false;
             if(opening&&workspace!=null)workspace.uncover();
             trace("destination-covered-move-app");moveCoveredApp(ticket,opening,source,destination);
         };
-        if(duoTrial){
+        if(duoEffect){
             outerFollowsHinge=true;
             if(opening)afterOuterBlack=()->{covered[1]=true;move.run();};
             scheduleFrame();
@@ -334,7 +337,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
             FrameTexture cover=cached!=null?cached:outgoing.transfer(!opening,destination.w,destination.h);
             main.post(()->{
                 if(ticket!=generation||stopped)return;
-                addLayer(destination,cover,false,duoTrial,ticket,()->{
+                addLayer(destination,cover,false,duoEffect,ticket,()->{
                     covered[0]=true;move.run();
                 });
             });
@@ -361,7 +364,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         // owned surfaces without hiding them. A reversal can reuse the session's frame.
         // A hinge reversal may precede the actual resize. Its source snapshot then
         // contains the old layout, so the Duo reveal must capture the resized app.
-        if(!duoTrial&&frozen.get(opening)!=null){framesReady(ticket,opening);return;}
+        if(!duoEffect&&frozen.get(opening)!=null){framesReady(ticket,opening);return;}
         awaitApp(ticket,incoming,()->captureDestination(ticket,opening));
     }
     private void awaitApp(int ticket,Panel panel,Runnable ready){
@@ -386,13 +389,13 @@ public final class MotionService extends Service implements DisplayManager.Displ
             Bundle result=bridge.captureBehind(id,exclude);Bitmap bitmap=result.getParcelable("frame",Bitmap.class);
             if(bitmap==null)throw new IllegalStateException(result.getString("error","@folduo/destination_capture_failed"));
             if(bitmap.getWidth()!=incoming.w||bitmap.getHeight()!=incoming.h)throw new IllegalStateException("@folduo/destination_resizing");
-            FrameTexture texture=duoTrial?FrameTexture.sharp(bitmap):FrameTexture.prepare(bitmap,density,()->ticket!=generation||stopped);
+            FrameTexture texture=duoEffect?FrameTexture.sharp(bitmap):FrameTexture.prepare(bitmap,density,()->ticket!=generation||stopped);
             main.post(()->{if(ticket!=generation||stopped||texture==null)return;Panel destination=findPanel(opening,true);if(destination!=null)showDestination(destination,texture,ticket);});
         }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.of(R.string.destination_failed,UiText.error(e)));});}});
     }
     private void showDestination(Panel panel,FrameTexture texture,int ticket){
         Runnable ready=()->{frozen.put(panel.inner,texture);framesReady(ticket,panel.inner);};
-        Layer layer=duoTrial?layers.stream().filter(l->l.displayId==panel.display.getDisplayId()&&l.committed)
+        Layer layer=duoEffect?layers.stream().filter(l->l.displayId==panel.display.getDisplayId()&&l.committed)
             .max(Comparator.comparingLong(l->l.serial)).orElse(null):null;
         if(layer==null){addLayer(panel,texture,false,false,ticket,ready);return;}
         if(!panel.inner&&!outerPortraitReady&&outerDarkness==1){
@@ -424,7 +427,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private void framesReady(int ticket,boolean inner){
         Runnable ready=()->{if(stopped||ticket!=generation)return;linkFrames();busy=false;trace("paired-frames-ready");scheduleFrame();};
         // Reveal the cover only after both its portrait geometry and pixels are ready.
-        if(duoTrial&&!inner)outerPortraitReady=true;
+        if(duoEffect&&!inner)outerPortraitReady=true;
         ready.run();
     }
     private void addLayer(Panel panel,FrameTexture frame,boolean sharpHold,boolean pendingLayout,int ticket,Runnable ready){
@@ -432,12 +435,12 @@ public final class MotionService extends Service implements DisplayManager.Displ
         try{
             Context context=createDisplayContext(panel.display).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,null);
             WindowManager wm=context.getSystemService(WindowManager.class);
-            SnapshotView view=new SnapshotView(context,frame,panel.inner,false);view.duoEffect=duoTrial;view.logicalWidth=panel.w;view.setSharpHold(sharpHold);
+            SnapshotView view=new SnapshotView(context,frame,panel.inner,false);view.duoEffect=duoEffect;view.setBlurStrength(blurStrength);view.logicalWidth=panel.w;view.setSharpHold(sharpHold);
             view.setLayoutMask(pendingLayout?1:0);
             if(!panel.inner)view.setRearFrame(frozen.get(true),false);
             Layer[] created=new Layer[1];SnapshotSurface root=new SnapshotSurface(context,view,()->main.post(()->{
                 Layer layer=created[0];if(ticket!=generation||stopped||!layers.contains(layer))return;
-                if(duoTrial&&!panel.inner){
+                if(duoEffect&&!panel.inner){
                     IShellBridge bridge=bound;SurfaceControl surface=layer.root.getSurfaceControl();
                     controls.execute(()->{try{
                         if(stopped||ticket!=generation)return;
@@ -478,20 +481,26 @@ public final class MotionService extends Service implements DisplayManager.Displ
         lp.gravity=Gravity.TOP|Gravity.LEFT;lp.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;lp.setFitInsetsTypes(0);return lp;
     }
     private void scheduleFrame(){if(!frameScheduled&&!stopped&&!paused){frameScheduled=true;Choreographer.getInstance().postFrameCallback(this);}}
+    private void refreshTuning(){
+        blurStrength=MotionSettings.blurStrength(MotionSettings.preset(this,"blur"));
+        responseSeconds=MotionSettings.responseSeconds(MotionSettings.preset(this,"response"));
+        outerFadeStart=MotionSettings.fadeStart(MotionSettings.preset(this,"fade"));
+        if(workspace!=null)workspace.setBlurStrength(blurStrength);
+    }
     @Override public void doFrame(long nanos){
         frameScheduled=false;if(stopped||paused||finishing||!Float.isFinite(target))return;
         float dt=lastFrame==0?1/80f:(nanos-lastFrame)/1e9f;lastFrame=nanos;
-        smoothed=FoldPolicy.smooth(smoothed,target,dt);if(Math.abs(smoothed-target)<.015f)smoothed=target;
+        smoothed=FoldPolicy.smooth(smoothed,target,dt,responseSeconds);if(Math.abs(smoothed-target)<.015f)smoothed=target;
         for(Layer layer:layers)layer.view.setAngle(smoothed);
         boolean shading=updateOuter(dt);
         if(smoothed!=target||shading)scheduleFrame();
     }
     private boolean updateOuter(float dt){
-        if(!duoTrial||!outerFollowsHinge)return false;
+        if(!duoEffect||!outerFollowsHinge)return false;
         // The angle sets opacity; readiness may only keep the cover darker. Never
         // reveal the wide app while waiting for its portrait frame on a reversal.
-        float desired=outerPortraitReady?FoldPolicy.outerDarkness(smoothed):1;
-        float next=FoldPolicy.smooth(outerDarkness,desired,dt);
+        float desired=outerPortraitReady?FoldPolicy.outerDarkness(smoothed,outerFadeStart):1;
+        float next=FoldPolicy.smooth(outerDarkness,desired,dt,responseSeconds);
         if(Math.abs(next-desired)<.001f)next=desired;
         Runnable ready=null;
         if(next==1&&afterOuterBlack!=null){
@@ -526,18 +535,18 @@ public final class MotionService extends Service implements DisplayManager.Displ
                 trace("handoff-with-stable-panels");
                 // Keep the outgoing portrait opaque until the independent black layer
                 // covers it. Fading both exposes the wide live app between the layers.
-                for(Layer layer:layers)if(!duoTrial||!inner||layer.view.inner)layer.root.animate().alpha(0).setDuration(180).setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator()).start();
-                boolean[] settled={false,!duoTrial};
+                for(Layer layer:layers)if(!duoEffect||!inner||layer.view.inner)layer.root.animate().alpha(0).setDuration(180).setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator()).start();
+                boolean[] settled={false,!duoEffect};
                 Runnable done=()->{if(stopped||ticket!=generation||!settled[0]||!settled[1])return;removeLayers();frozen.clear();finishing=false;smoothed=target;restoreStatusIcons();trace("idle");updateNavigation();};
-                if(duoTrial)sendOuterDarkness(inner?1:0,ticket,()->{settled[1]=true;done.run();});
+                if(duoEffect)sendOuterDarkness(inner?1:0,ticket,()->{settled[1]=true;done.run();});
                 main.postDelayed(()->{
                     if(stopped||ticket!=generation)return;
-                    for(Layer layer:new ArrayList<>(layers))if(!duoTrial||!inner||layer.view.inner)removeLayer(layer);
+                    for(Layer layer:new ArrayList<>(layers))if(!duoEffect||!inner||layer.view.inner)removeLayer(layer);
                     settled[0]=true;done.run();
                 },200);
             };
             FrameTexture cover=frozen.get(false);
-            if(duoTrial&&!inner&&workspace!=null&&cover!=null){
+            if(duoEffect&&!inner&&workspace!=null&&cover!=null){
                 try{workspace.cover(cover.sharp,reveal);}catch(Exception e){fail(UiText.error(e));}
             }else reveal.run();
         });
@@ -641,7 +650,8 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private void removeLayer(Layer layer){layers.remove(layer);layer.root.animate().cancel();try{layer.wm.removeViewImmediate(layer.root);}catch(Exception ignored){}}
     private void removeLayers(){for(Layer layer:new ArrayList<>(layers))removeLayer(layer);}
     @Override protected void dump(FileDescriptor fd,PrintWriter out,String[] args){
-        out.println("duoTrial="+duoTrial);
+        out.println("duoEffect="+duoEffect);
+        out.println("blurStrength="+blurStrength+" responseSeconds="+responseSeconds+" outerFadeStart="+outerFadeStart);
         out.println("running="+running+" paused="+paused+" unlocked="+unlocked()+" status="+status.resolve(this));
         out.println("enabled="+MotionSettings.enabled(this)+" recoveries="+recoveries+" lastRecovery="+lastRecovery.resolve(this));
         out.println("source="+source+" target="+target+" smoothed="+smoothed+" ageMs="+(SystemClock.elapsedRealtime()-measuredAt)+" accepted="+acceptedAngles);

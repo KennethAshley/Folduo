@@ -379,10 +379,9 @@ public class NativeHandoffTest {
         Activity activity=instrumentation.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try{
             assertFalse("Unlock for native navigation check",context.getSystemService(KeyguardManager.class).isKeyguardLocked());
-            automation.clearCache();AccessibilityNodeInfo root=automation.getRootInActiveWindow();assertNotNull(root);
-            List<AccessibilityNodeInfo> buttons=root.findAccessibilityNodeInfosByText(context.getString(R.string.enable_animation));
-            assertFalse("Enable button is available",buttons.isEmpty());assertTrue(buttons.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK));
-            await("Enable starts the native service",8000,()->RevealService.running&&BridgeConnection.bridge!=null&&BridgeConnection.bridge.inspect().getBoolean("running"));
+            // This checks the legacy native service, which is no longer the app default.
+            context.startForegroundService(new Intent(context,RevealService.class).setAction("start"));
+            await("Legacy native service starts",8000,()->RevealService.running&&BridgeConnection.bridge!=null&&BridgeConnection.bridge.inspect().getBoolean("running"));
             assertFalse("Legacy service stays stopped",MotionService.running);
             shell("am start --display 0 -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "+CALCULATOR+"/.Calculator -f 0x30000000");
             await("Calculator ready",5000,()->node("calc_keypad_btn_clear")!=null);
@@ -394,7 +393,7 @@ public class NativeHandoffTest {
             });
             assertTrue("Native reveal remains enabled",RevealService.running&&MotionSettings.enabled(context));
             assertFalse(RevealService.showing);assertEquals(0,RevealService.completed);
-            report("NATIVE_HOME_OK: Enable starts the native service and a real bottom-edge swipe reaches Kvaesitso while enabled.");
+            report("NATIVE_HOME_OK: Legacy native service starts and a real bottom-edge swipe reaches Kvaesitso while enabled.");
         }finally{
             MotionSettings.setEnabled(context,false);context.stopService(new Intent(context,RevealService.class));
             await("Navigation check stopped",5000,()->!RevealService.running);instrumentation.runOnMainSync(activity::finish);

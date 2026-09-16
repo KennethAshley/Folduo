@@ -1,3 +1,5 @@
+> **Fold8版について:** このページは旧Fold7版の説明です。現在のFold8版のインストール、操作、設定は[英語のREADME](README.md)を参照してください。以下のFold7用APKや壁紙設定は、Fold8版の導入手順ではありません。
+
 **CodexのGPT-6 Astraでバイブコーディングしたアプリです。**
 
 [English](README.md) | 日本語

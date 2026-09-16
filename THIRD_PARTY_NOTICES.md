@@ -1,27 +1,14 @@
-# Fold8 trial: external shader dependency
+# Fold8 glass renderer
 
-The trial's GPU renderer uses `app/src/main/res/raw/duo_fold.agsl` from
-[kuris/foldtoduo](https://github.com/kuris/foldtoduo), pinned to commit
-`d501fdbdb0ecee000fea65d98fbcb17dcdc980d1`. The accepted build uses that file
-unchanged. Its header credits an AGSL port of
-`DuoLikeAnimation/Shaders/DuoFold.metal`; that attribution stays in the file.
+Build 77 replaces the former external `duo_fold.agsl` dependency with this fork's
+own glass projection in `DuoSnapshotRenderer.java` and Android's native Gaussian
+blur. This implementation is included under the repository's MIT license.
+No foldtoduo shader, Apple images, or reference-video assets are bundled.
 
-No license declaration was found in the pinned upstream repository. This shader
-is an external build input, excluded from this Git repository; the MIT license
-for Folduo does not relicense it. This source push does not include an APK.
-
-Before building this branch, retrieve the exact file from its original source:
-
-```sh
-mkdir -p app/src/main/res/raw
-curl --fail --location \
-  https://raw.githubusercontent.com/kuris/foldtoduo/d501fdbdb0ecee000fea65d98fbcb17dcdc980d1/app/src/main/res/raw/duo_fold.agsl \
-  --output app/src/main/res/raw/duo_fold.agsl
-echo '9021c564598bae27c3b511fd3dba3024648138227fa9d69f944da7544efec2eb  app/src/main/res/raw/duo_fold.agsl' | shasum -a 256 --check
-```
-
-Continue only when the checksum reports `OK`. Local screen captures, wallpapers,
-reference videos, signing keys, and device logs are also excluded from this push.
+Earlier local builds used a shader from [kuris/foldtoduo](https://github.com/kuris/foldtoduo).
+It had no license statement in the inspected upstream revision and is not included
+in this source or APK. If upgrading an old checkout, remove its downloaded
+`app/src/main/res/raw/duo_fold.agsl` before building.
 
 ---
 

@@ -1,150 +1,225 @@
-## Galaxy Z Fold8 experimental fork
+# Folduo for Galaxy Z Fold8
 
-This fork adapts [bunkaich/Folduo](https://github.com/bunkaich/Folduo) for the
-Galaxy Z Fold8 **SM-F971U**, tested on Android 17 / One UI 9.0. Current version:
-**0.1.27-fold8.33** (build 74), accepted experimental Twitter trial.
+Animate the screen you are using as you open or close your Fold8. Folduo uses
+hinge-driven blur, keeps the active app task, and reveals it at the destination
+screen's size. Keep your existing launcher and saved wallpapers.
 
-- Keeps the selected launcher and saved wallpapers. The active trial uses custom
-  inner-screen navigation and keeps both displays available through Shizuku.
-- Animates app snapshots with GPU blur and hinge-driven cover shading. The same
-  Twitter task changes between cover and inner dimensions.
-- Reveals the actual portrait frame sooner when closing. Fast folds can still
-  outrun preparation; battery use and other apps need further testing.
-- The accepted effect currently runs through the opt-in debug test below, with a
-  user-operated Start button, notification Stop, and a ten-minute session limit.
-  The normal Enable button is a separate, older animation path.
+**Experimental build:** `0.1.27-fold8.36` (77). The installed app is named
+**Folduo Fold8 Test**. This branch adapts [bunkaich/Folduo](https://github.com/bunkaich/Folduo)
+and includes an original glass renderer using Android’s native blur.
 
-See [FOLD8.md](FOLD8.md) for implementation details, build commands, verified
-checks, and remaining limitations. Diagnostic logs referenced there are local
-development artifacts and are not included in this repository.
-
-**The documentation and downloads below describe the upstream Fold7 version.**
-Use the Fold8 instructions in [FOLD8.md](FOLD8.md) for this experimental branch.
-
----
-
-**Vibe-coded with GPT-6 Astra in Codex.**
-
-English | [日本語](README.ja.md)
-
-# Folduo
-
-I built this out of curiosity. I don't plan to actively develop or maintain it. I may make changes if something sparks my interest, but otherwise expect this repository to remain mostly untouched.
-
-An experimental Galaxy Z Fold7 app that uses hinge angle to create a frosted-glass transition between the cover and inner screens. It holds an app's image in place with parallax and blur while the phone folds, then hands over to the app on the other display. It works with regular apps without replacing your launcher.
-
-[Download v0.1.21](https://github.com/bunkaich/Folduo/releases/tag/v0.1.21)
+[Install](#install-and-start) · [Controls](#controls) · [Settings](#animation-settings) ·
+[Troubleshooting](#troubleshooting) · [Build from source](#build-from-source)
 
 ## Requirements
 
-- **Galaxy Z Fold7 SM-F966Z only.** Display control is disabled on other models.
-- Tested on Android 16 / One UI 8.5, build `F966ZSCS1BZH4`.
-- [Shizuku](https://shizuku.rikka.app/guide/setup/), installed and running. Tested with `13.6.0.r1086.2650830c`.
-- The supported Samsung stock interactive wallpaper, configured as described below.
+- **Tested device:** Galaxy Z Fold8 **SM-F971U**, Android 17 / One UI 9.0.
+  Other Fold8 variants and other foldables have not been validated with this mode.
+- **Shizuku**, installed, running, and authorized for Folduo.
+- Permission to **display over other apps** and show notifications.
+- Start with the phone **closed and unlocked**. Root and a replacement launcher
+  are not required. The tested Fold8 supplies hinge readings without changing
+  to a Samsung stock wallpaper.
 
-No root required. Once set up, it can run without USB if Shizuku is started through wireless debugging. Shizuku must be restarted after a reboot. Long-term stability without USB has not been verified.
+## Install and start
 
-## Setup
+### 1. Install the app
 
-Folduo supports English and Japanese. At the top of the app, tap **Language / 言語** and choose **English**, **日本語**, or **System default**. The choice is saved and also appears in Android’s app language settings. Japanese devices use Japanese by default; other devices use English.
+Download **Folduo-Fold8-0.1.27-fold8.36.apk** from the
+[Fold8 experimental release](https://github.com/KennethAshley/Folduo/releases/tag/fold8-v77).
+On your phone, open the APK and allow installation from that browser or file
+manager when Android asks. Only the app APK is needed; source-code archives and
+the development test APK are not needed for everyday use.
 
-### 1. Start Shizuku
+This is a pre-release for the tested Fold8, signed with the existing development
+key. It uses the same package ID as upstream Folduo. See
+[update and signing-key notes](#stop-resume-and-update) before replacing another
+build. The original Folduo Fold7 download is a different version.
 
-Follow the [official setup guide](https://shizuku.rikka.app/guide/setup/) to install and start Shizuku using wireless debugging or a computer.
+Prefer to compile it yourself? Follow [Build from source](#build-from-source).
 
-### 2. Configure the stock wallpaper
+### 2. Start Shizuku
 
-Fine-grained angles come from Samsung's interactive wallpaper through a Shizuku helper. On the tested device, the standard hinge sensor mainly reported 0°, 90° and 180°. This app does not estimate the angle using two gyroscopes.
+Install Shizuku from its [official download page](https://shizuku.rikka.app/download/).
+Use its [wireless debugging setup guide](https://shizuku.rikka.app/guide/setup/#start-via-wireless-debugging)
+to enable debugging, pair, and start Shizuku on the phone. Wait until Shizuku
+reports that it is running.
 
-1. Stop Folduo and any other fold-animation or display-control helpers.
-2. Set the inner home screen to the Samsung stock interactive wallpaper identified internally as `video_002.mp4`. The cover home screen must use its matching stock image, `sub_wallpaper_002`. Wallpaper names in Settings vary by OS version.
-3. To get fine-grained angles on the cover screen too, use the helper below to apply the same stock interactive wallpaper there. **This changes the cover home wallpaper in One UI as well.** Keep your original wallpaper if you want to restore it later.
+Wireless startup does not require root or a computer. Shizuku needs to be
+started again after a phone reboot. Its guide also explains startup using a
+computer if you prefer that method.
 
-Download and extract `folduo-wallpaper-setup-0.1.21.zip` from the release. Install Python 3 and Android SDK platform-tools (ADB). Connect one phone with USB debugging authorized, then run these commands in the extracted folder:
+### 3. Grant access
 
-```sh
-python3 cover-wallpaper.py status
-python3 cover-wallpaper.py apply
-```
+1. Open **Folduo Fold8 Test** and scroll to **Initial setup**.
+2. Tap **Connect Shizuku** and allow Folduo in the Shizuku permission prompt.
+3. Tap **Allow display over other apps** and enable that permission for Folduo.
 
-`status` checks the wallpaper without changing it. `apply` changes the cover home wallpaper only, not the lock screen. Add `--adb /path/to/adb` if ADB is not on your PATH, or `--serial DEVICE_SERIAL` if multiple devices are connected.
+Folduo also requests notification permission when you start it. Allow it so you
+can reach **Stop** and **Resume** from the persistent notification.
 
-The helper refuses to overwrite unsupported or custom wallpapers. If it reports `other wallpaper` or `Expected inner angle-aware wallpaper unavailable`, the required wallpaper is not configured. It uses assets already installed on your phone; no Samsung wallpaper files are included here.
+### 4. Start the animation
 
-To build the helper yourself, prepare the [build environment](#build-from-source), then run from the repository root:
+1. Close the phone fully and unlock the cover screen.
+2. Return to Folduo, read the screen-access explanation, and tap **Start animation**.
+3. Wait for its notification to show **Active**.
+4. Go Home and open an app normally, such as Calculator or Twitter/X.
+5. Open and close the phone. The animation follows the hinge; the live app becomes
+   interactive after the transition clears.
 
-```sh
-python3 tools/build-wallpaper-helper.py
-python3 tools/cover-wallpaper.py status
-python3 tools/cover-wallpaper.py apply
-```
+There is no session timer and no need to launch a test from a computer. Folduo
+stays enabled until you tap **Stop**. Locking pauses screen capture and releases
+display control; after unlocking, close fully once to prepare again.
 
-### 3. Install and start the app
+## Controls
 
-1. Install `Folduo-0.1.21.apk` from the release. With ADB: `adb install -r Folduo-0.1.21.apk`.
-2. Open **Folduo**, tap **Connect Shizuku**, and grant access.
-3. Tap **Allow display over other apps**. Allow notifications too.
-4. Read the screen-capture explanation, then tap **Allow temporary screen access and enable**.
-5. With the phone unlocked, close it fully once to initialize. Open an app such as Calculator and slowly fold and unfold the phone.
+The cover uses Samsung's normal navigation. While Folduo is active, the inner
+screen uses these controls:
 
-## Controls and limitations
+| Action | Inner-screen gesture |
+| --- | --- |
+| Home | Swipe up from the small white line at the bottom. |
+| Recent apps | Swipe up from that line and hold, then select an app card. |
+| Back | Swipe inward from either side edge. |
 
-The cover screen uses Samsung's normal navigation. The inner screen has a small custom bar for **Recents, Home, Back and Settings**. Native navigation gestures and the notification/quick-settings shade are not fully available on the inner screen. Use the custom bar, the cover screen, or stop the app when you need the normal controls.
+Taps are blocked while a frozen transition image covers the app. The cover
+fades to black during opening so the app can resize for the inner display
+without exposing its wide layout outside. When closing, the cover reveals the
+portrait app once it is ready.
 
-- Both displays are kept on while active, increasing battery use. Normal display control resumes when stopped or locked.
-- The transition uses a frozen image. Video and games do not keep playing in that image.
-- Home, Recents and other system screens are not handled like regular app tasks. Protected screens and apps that refuse display migration are unsupported.
-- App resizing can still cause layout shifts. Samsung's private APIs and wallpaper responses may change after OS updates.
-- If Shizuku stops, the animation stops. Automatic recovery is not guaranteed.
+For Samsung's normal inner-screen controls or notification shade, stop Folduo.
+You can also access Folduo's notification from the cover screen.
 
-## Folduo home
+## Animation settings
 
-To use the included launcher, tap **Use Folduo as the home app** in Folduo settings and select Folduo. Tap an icon to open an app, long-press to replace it, or use **All apps** to browse installed apps. Tap the **Folduo** button on the home screen to return to settings. English and Japanese are supported.
+Open Folduo and scroll to **Animation settings**. Tap a setting to choose a preset.
 
-On the tested Fold7, Samsung redirects new app launches from the inner display to the cover display. Folduo home moves only the selected app to the inner display and restores the selected home when returning. This does not fix other launchers.
+| Setting | Choices | What changes |
+| --- | --- | --- |
+| **Blur strength** | Light / Default / Strong | How frosted the folding image looks. The temporary mask during app resizing stays protected. |
+| **Responsiveness** | Quick / Default / Smooth | Quick follows the hinge sooner. Smooth softens stepped readings but follows your hand later. |
+| **Outer-screen fade** | Earlier / Default / Later | When the cover darkens during opening. Later keeps it visible longer and delays the inner app resizing. Closing follows the same angle range in reverse. |
 
-Three Calculator/home round trips, moving the home between both displays, long-press selection and opening settings passed on the phone with both displays held on by the helper. The final check with physical folding is still pending. If an app does not open after unfolding, close the phone and launch it from the cover home screen.
+Choices are saved and apply between folds. Start with **Default** for the tested
+look. **Reset to tested defaults** resets all three settings without changing
+Start/Stop, permissions, launcher selection, or wallpapers.
 
-## Stop and restore
+Use **Language / 言語** at the top of the app to select English, Japanese, or the
+system default. [README.ja.md](README.ja.md) contains the older upstream Fold7
+instructions; this English guide describes the current Fold8 branch.
 
-- **Stop:** open the app and tap **Stop and release display control**. Do this before uninstalling.
-- **Resume:** make sure Shizuku is running, then use **Resume** in the notification or **Resume animation** in the app. Unlock and close the phone fully once.
-- **After a reboot:** start Shizuku again, then resume the app if needed.
-- **If the display or controls get stuck:** close the phone and stop the app from the cover screen. If that is not possible, reboot and disable the app's always-on mode before restarting Shizuku.
-- **Restore your wallpaper:** stop the app and choose a wallpaper in Android Settings. To restore the specific stock cover image changed by the helper, run this in the extracted helper folder:
+## Stop, resume, and update
 
-```sh
-python3 cover-wallpaper.py restore-stock
-```
+- **Stop:** tap **Stop** in Folduo or its notification. This removes the animation
+  and custom controls, restores native display dimensions, and releases display
+  control. Stop before uninstalling.
+- **Start again:** close and unlock the phone, check that Shizuku is running, and
+  tap **Start animation**. If already enabled, use **Resume** in the notification.
+- **After a reboot:** start Shizuku again, open Folduo, and close fully while
+  unlocked. Tap **Start animation** if it is stopped.
+- **Update:** stop Folduo, then install a newer APK signed with the same key over
+  the existing app. Settings remain saved. Start again when ready.
 
-From a source checkout, use `python3 tools/cover-wallpaper.py restore-stock`. This restores the known stock image, not an arbitrary previous wallpaper. It refuses to overwrite a different wallpaper selected since setup.
+## Troubleshooting
+
+| What you see | What to do |
+| --- | --- |
+| Shizuku is unavailable or disconnected | Start Shizuku, return to Folduo, and tap **Connect Shizuku**. Check Shizuku's authorized-app list if access was denied. |
+| “Close the phone fully once to finish setup” | Close fully, unlock, and leave it closed until setup finishes. Starting while unfolded cannot prepare this mode. |
+| The blur remains, controls stop responding, or a screen is stuck | Close the phone and tap **Stop** from the cover notification or Folduo. If you cannot reach either, reboot. Stop Folduo before restarting Shizuku. |
+| Animation feels delayed or uneven | Try **Responsiveness → Quick**, or **Reset to tested defaults**. Hinge readings are stepped, and fast folds can outrun app preparation. |
+| Android stops the app in the background | Use Folduo's **Open app battery settings** button. Consider unrestricted battery use for Folduo and Shizuku, then reconnect and start again. |
+
+## Known limits and screen access
+
+- Both displays are kept available while active, including between folds. This
+  uses extra battery. Longer sessions and battery impact need further testing.
+- Transitions use frozen app images. Video and games do not keep moving inside
+  those images; live content returns when the transition clears.
+- Protected screens cannot be captured. App resizing, rotation, fast folds, and
+  individual app behavior can still cause problems. This is not an all-app
+  compatibility guarantee.
+- The mode relies on Samsung/Android private display APIs. Firmware updates may
+  change their behavior. Losing Shizuku can interrupt animation and require recovery.
+- While enabled and unlocked, Folduo captures screen content to prepare and draw
+  transitions. Images stay in memory and are not saved or uploaded. The app has
+  no internet permission, analytics, or ads. Shizuku is a separate privileged helper.
+
+The standalone app passed two user-operated Twitter fold cycles in build 75.
+Build 76 preserves those defaults and adds settings, with 56 unit checks and four
+settings/rendering checks passing. Build 77 replaces the renderer with native
+Gaussian frost and original glass projection; seven GPU rendering checks pass,
+including repeated reversals at the inner panel’s full resolution. Physical
+comparison of the new glass effect is pending. Alternate presets still need
+subjective tuning.
+See [FOLD8.md](FOLD8.md) for verification details and development history.
 
 ## Build from source
 
-Use Git, JDK 17 and the Android SDK. Set `JAVA_HOME` to your JDK and `ANDROID_HOME` to your SDK; add `platform-tools` to PATH for ADB.
+These commands are for macOS/Linux shells. The development build was verified on
+macOS with JDK 21. On Windows, use Android Studio or `gradlew.bat` with equivalent
+SDK setup.
+
+### 1. Prepare the tools
+
+Install Git, JDK 21, and the Android SDK command-line tools. Set `JAVA_HOME` to the
+JDK and `ANDROID_HOME` to the SDK. Make `sdkmanager` and `adb` available on your PATH.
+Then install the SDK packages and accept their licenses:
 
 ```sh
 sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
 sdkmanager --licenses
-
-git clone https://github.com/bunkaich/Folduo.git
-cd Folduo
-git checkout v0.1.21
-./gradlew :app:assembleRelease :app:testDebugUnitTest :app:lintRelease
 ```
 
-Output: `app/build/outputs/apk/release/app-release.apk`. Use `gradlew.bat` on Windows. Builds were verified on macOS with Java 17; Windows and Linux have not been tested end to end.
+### 2. Get this branch
 
-The wrapper pins Gradle 9.5.1 and verifies its checksum. AGP is 9.2.1; compile SDK is 37, target SDK is 36, and minimum SDK is 33. Initial builds need internet access to download dependencies. The wallpaper helper also needs Python 3.
+```sh
+git clone --branch codex/foldtoduo-fine --single-branch https://github.com/KennethAshley/Folduo.git
+cd Folduo
+```
 
-The release APK uses the existing experimental debug signing certificate. Signing keys are not published. Your own build uses your local certificate and cannot directly replace the release APK. Stop and uninstall the existing app before switching signatures; settings and permissions will need to be configured again. Uninstalling does not restore the wallpaper.
+### 3. Build the app
 
-Release downloads include `SHA256SUMS`. Compare the APK with `shasum -a 256 Folduo-0.1.21.apk` on macOS or `sha256sum Folduo-0.1.21.apk` on Linux.
+All shader code is included. If you previously built this branch with the external
+shader, remove the old `app/src/main/res/raw/duo_fold.agsl` file first. The build
+rejects that obsolete resource so it cannot accidentally enter a new APK.
 
-## Screen access
+```sh
+./gradlew :app:assembleDebug :app:testDebugUnitTest
+```
 
-Shizuku grants ADB shell-level access. Captured images are used in memory and are not saved or uploaded by the app. Protected screens are excluded. The app has no internet permission, analytics or ads. Do not post private screenshots, device serials or unedited diagnostic logs in public issues.
+APK: `app/build/outputs/apk/debug/app-debug.apk`.
+Both debug and release variants use the same animation. The current Gradle release
+configuration also uses a development signing key, as does this experimental APK.
+A permanent release signing identity has not been established.
+The initial build needs internet access for dependencies.
 
-## License
+### 4. Install on the phone
 
-Original code: [MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for dependencies. No Apple or Samsung UI assets, wallpapers or videos are distributed. This project is not affiliated with Apple, Samsung or Shizuku.
+Enable USB debugging, connect the phone, unlock it, and accept its USB-debugging
+authorization prompt. With one Android device connected:
+
+```sh
+adb -d install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Then return to [Start Shizuku](#2-start-shizuku) above. See Android's
+[ADB guide](https://developer.android.com/tools/adb) for connection help.
+
+If installation reports a signing-key mismatch, your local build cannot update
+that installed APK. To switch builds, first stop Folduo, then uninstall the old
+copy and install yours; uninstalling removes Folduo's settings and permissions.
+The current package identifier is shared with upstream Folduo, so the two cannot
+be installed side by side.
+
+## Credits and licensing
+
+Original Folduo code is [MIT licensed](LICENSE), copyright bunkaich. This fork
+adds Fold8 adaptations and its own glass renderer under the same MIT license.
+Earlier local experiments used [kuris/foldtoduo](https://github.com/kuris/foldtoduo);
+its shader is no longer included or required. See
+[third-party notices](THIRD_PARTY_NOTICES.md) for bundled dependency licenses.
+
+Apple/Samsung wallpapers, videos, and UI assets are not included in this source
+repository. This project is not affiliated with Apple, Samsung, or Shizuku.
+For the original Fold7 project, see the [upstream repository](https://github.com/bunkaich/Folduo).

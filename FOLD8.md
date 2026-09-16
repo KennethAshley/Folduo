@@ -1,6 +1,102 @@
 # Fold8 experimental branch
 
-## Accepted build: v74 / 0.1.27-fold8.33
+## Original glass candidate: v77 / 0.1.27-fold8.36
+
+Replaces the unlicensed external shader with an original AGSL glass projection
+and Android RenderEffect Gaussian blur. The left inner pane has progressively
+stronger frost, slight refraction, and depth shading toward its free edge. The
+inner right pane stays pixel-identical, and both live endpoints stay clear.
+Cover shading runs in the opposite direction. Existing hinge smoothing, screen
+handoff, app-state continuity, Start/Stop, and settings are unchanged.
+
+Five native blur levels are blended by variance. Captured images remain on the
+GPU; this path does not build the legacy CPU blur cache. A fine-stripe rendering
+check failed on build 76 (17 levels of residual contrast) and passes on build 77
+(maximum allowed 8). This demonstrates reduced sampling artifacts, not a measured
+improvement in whole-app frame rate.
+
+Validation on SM-F971U: 56 JVM checks; seven GPU checks covering fine detail,
+sharp endpoints/right pane, blur presets, layout exchange, opaque resize mask,
+hardware captures, and repeated reversals at 2448×1848; normal Start/Stop,
+notification Resume/Stop, and package-update restore without adopted shell
+permissions. Physical visual comparison is pending.
+
+No external shader download is required. The build rejects an obsolete
+`app/src/main/res/raw/duo_fold.agsl` left in an older checkout. Earlier build notes
+below describe their historical dependencies and behavior. Build 76 remains a
+private rollback, not a redistribution artifact.
+
+
+## Animation settings: v76 / 0.1.27-fold8.35
+
+The normal app now offers three saved animation controls and **Reset to tested
+defaults**. Each starts at Default, preserving the accepted v75 appearance.
+
+| Control | Choices | Effect |
+| --- | --- | --- |
+| Blur strength | Light / Default / Strong | Scales GPU blur spread and radius by 0.65 / 1 / 1.35. Sharp endpoints, the inner right pane, and the protective resize mask remain unchanged. |
+| Responsiveness | Quick / Default / Smooth | Uses 12 / 24 / 55 ms angle and outer-shade response. Faster response reduces lag; slower response softens stepped readings. |
+| Outer-screen fade | Earlier / Default / Later | Starts fading at 25 / 45 / 65 degrees and finishes 75 degrees later. Closing follows the same range in reverse. Later delays the inner resize; the cover still must be opaque before resizing. |
+
+Changes are picked up between folds; an active transition retains its settings.
+Reset only clears these three choices. It does not change Start/Stop, permissions,
+launcher selection, or wallpapers. Invalid saved choices fall back to Default.
+
+Validation: debug/release builds compile; 56 JVM checks pass. Four device checks
+pass against the release build without adopted shell permissions: actual settings
+selection/persistence/Reset and idle-service application, GPU blur variation,
+sharp endpoints/right pane, and the protective resize mask. The default animation
+was physically accepted in v75; alternate settings still need subjective tuning.
+
+## Accepted standalone build: v75 / 0.1.27-fold8.34
+
+The app's **Start animation** button now starts the v74 GPU animation directly.
+Notification Resume, service restoration, and boot/package-update restoration
+use the same renderer in debug and release builds. No trial extra, instrumentation
+session, Twitter launch, or session timer is required. Start while closed and
+unlocked, wait for the active status, then use the usual launcher and apps.
+
+The app and notification both provide **Stop**. Stop persists the disabled choice,
+removes animation/navigation overlays, restores native display dimensions, and
+releases Samsung display control. Locking pauses capture and releases control;
+after unlocking, close fully once to prepare again. Shizuku must be available.
+The legacy preview was removed from the setup screen because it shows a different
+renderer. The older native reveal service remains available to its diagnostic tests.
+
+The setup text now describes custom inner-screen Home/Back/Recents swipes, memory-only
+screen capture while unlocked, and the extra battery cost of keeping both displays
+available. Existing launcher and saved wallpaper choices are preserved.
+
+Validation: debug and release builds compile, 53 JVM tests pass, and
+`StandaloneMotionTest.appAndNotificationControlsUseAcceptedModeWithoutTestPermissions`
+passes against both installed variants (3.693 s debug; 3.033 s release). It taps the
+real app controls and notification actions, checks enabled update restoration,
+verifies an update cannot undo Stop, and observes native display cleanup. It uses
+neither `adoptShellPermissionIdentity` nor `--no-hidden-api-checks`.
+The user started the release build from the normal app, opened Twitter normally,
+and confirmed two physical open/close cycles: “Both cycles work.”
+
+The local release variant is still signed with the existing development key.
+This is not a public release: shader licensing, release signing/identity, and
+broader device/app testing remain outstanding.
+
+### Run without the test harness
+
+1. Install the app, start Shizuku, and grant Shizuku, overlay, and notification access.
+2. Close and unlock the phone, open Folduo, and tap **Start animation**.
+3. Wait for the active status, return to the usual apps, and fold normally.
+4. Use **Stop** in Folduo or its notification to restore normal display control.
+
+To run the opt-in regression check, install the matching debug test APK and keep
+the phone closed and unlocked:
+
+```sh
+adb -d shell am instrument -w -r -e folduoHardware true \
+  -e class jp.bunkaich.sukashimotion.StandaloneMotionTest \
+  jp.bunkaich.sukashimotion.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+## Accepted animation baseline: v74 / 0.1.27-fold8.33
 
 Tested on Galaxy Z Fold8 SM-F971U, Android 17 / One UI 9.0, with Shizuku.
 The latest accepted result is the continuous Twitter trial in
@@ -11,8 +107,8 @@ before widening the app, and reveals the fresh portrait frame when closing.
 The trial keeps both panels available and uses custom navigation on the inner
 screen. It does not replace the selected launcher or saved wallpapers. Samsung's
 hardware hinge log supplies stepped angle readings; no stock wallpaper change is
-needed for that source on the tested phone. The normal app Enable button runs a
-separate older mode and does not start this trial.
+needed for that source on the tested phone. In v74, the normal app Enable button ran a
+separate older mode; v75 connects the accepted effect to the normal app controls.
 
 Closing reuses the opaque native cover while restoring the portrait app, avoiding
 a hidden placeholder and hidden layout blend. Three timing samples improved from

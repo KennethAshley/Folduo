@@ -27,7 +27,7 @@ final class FrameTexture {
         return transfer(sourceInner,width,height,false);
     }
     FrameTexture transfer(boolean sourceInner,int width,int height,boolean leftPane){
-        // The Duo shader blurs the sharp image itself. Transfer that image without
+        // The glass renderer blurs the sharp image on the GPU. Transfer that image without
         // building or remapping the legacy renderer's six CPU blur levels.
         Bitmap readable=sharp.getConfig()==Bitmap.Config.HARDWARE?sharp.copy(Bitmap.Config.ARGB_8888,false):sharp;
         if(readable==null)throw new IllegalStateException("Snapshot copy unavailable");

@@ -1,3 +1,9 @@
 <resources>
     <item name="language_button" type="id"/>
+    <item name="start_animation" type="id"/>
+    <item name="stop_animation" type="id"/>
+    <item name="blur_setting" type="id"/>
+    <item name="response_setting" type="id"/>
+    <item name="fade_setting" type="id"/>
+    <item name="reset_animation_settings" type="id"/>
 </resources>

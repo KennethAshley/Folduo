@@ -1,5 +1,46 @@
 # Fold8 experimental branch
 
+## Accepted glass appearance: v79 / 0.1.27-fold8.38
+
+Removes v78's cosine projection, which stretched a narrow source strip across the
+moving pane. Reuses the conservative vertical compensation in `GlassProjection`
+and leaves all horizontal image coordinates unchanged. Native blur radii now
+scale with pane width; frost and shading increase away from the hinge. The right
+inner pane and live endpoints stay clear. Screen handoff and navigation are
+unchanged.
+
+The regression check first reproduced v78's distortion: display x=64 sampled
+roughly x=267 in a gradient at 90 degrees. With stable width restored, the check
+then exposed weak far-edge separation. GPU calibration now checks both geometry
+and a 24–55 pixel frost edge at the 640×720 test size while keeping the near-hinge
+edge no wider than 4 pixels. Those checks constrain artifacts; they do not prove
+the subjective glass illusion or an exact match to the reference video.
+
+Eight on-device rendering checks pass (9.226 seconds), including full-resolution
+reversals, blur presets, hardware captures, layout blending, opacity, and clear
+endpoints. Physical Twitter comparison: text kept its shape and the effect felt
+more like glass. This is the accepted appearance baseline; it does not establish
+an exact match to the reference or compatibility with every app. Release:
+https://github.com/KennethAshley/Folduo/releases/tag/fold8-v79.
+
+
+## Depth candidate: v78 / 0.1.27-fold8.37 (local)
+
+The first original renderer (v77) looked like ordinary blur in the physical
+comparison. This candidate replaces its shallow displacement with a ray/plane
+projection: the rotating pane shows a different portion of a flat image behind
+it. The viewing distance is fixed at six panel widths, with the near-edge-on
+pose capped at 80 degrees. This is a visual approximation, not viewer tracking.
+The existing blur, handoff, and navigation paths are unchanged.
+
+A gradient check distinguishes image displacement from flat blur: it failed on
+v77 and passes on v78. Eight on-device rendering checks pass, including clear
+endpoints/right pane, hardware frames, layout exchange, opacity, settings, and
+repeated reversals. Physical feedback: the image looked stretched/warped. Replaced
+by v79; never published. The earlier public v77 preview remains at
+https://github.com/KennethAshley/Folduo/releases/tag/fold8-v77.
+
+
 ## Original glass candidate: v77 / 0.1.27-fold8.36
 
 Replaces the unlicensed external shader with an original AGSL glass projection
@@ -19,7 +60,8 @@ Validation on SM-F971U: 56 JVM checks; seven GPU checks covering fine detail,
 sharp endpoints/right pane, blur presets, layout exchange, opaque resize mask,
 hardware captures, and repeated reversals at 2448×1848; normal Start/Stop,
 notification Resume/Stop, and package-update restore without adopted shell
-permissions. Physical visual comparison is pending.
+permissions. Physical feedback found the appearance too close to ordinary blur;
+v79 improves the distinction between the hinge and free edge.
 
 No external shader download is required. The build rejects an obsolete
 `app/src/main/res/raw/duo_fold.agsl` left in an older checkout. Earlier build notes

@@ -7,8 +7,8 @@ android {
   applicationId = "jp.bunkaich.sukashimotion"
   minSdk = 33
   targetSdk = 36
-  versionCode = 77
-  versionName = "0.1.27-fold8.36"
+  versionCode = 79
+  versionName = "0.1.27-fold8.38"
   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
  }
  buildFeatures { buildConfig = true; aidl = true }

@@ -320,6 +320,39 @@ public class RenderTest {
   }
   stripes.recycle();
  }
+ @Test public void glassKeepsContentWidthAndSeparatesTheFreeEdge()throws Exception{
+  Bitmap gradient=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888),white=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888),black=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);
+  white.eraseColor(Color.WHITE);black.eraseColor(Color.BLACK);
+  for(int y=0;y<720;y++)for(int x=0;x<640;x++)gradient.setPixel(x,y,Color.rgb(Math.round(x*255f/640),0,0));
+  for(float angle:new float[]{90,120,150}){
+   Bitmap refracted=render(true,angle,gradient,null,false,false,v->v.duoEffect=true);
+   Bitmap light=render(true,angle,white,null,false,false,v->v.duoEffect=true);
+   Bitmap dark=render(true,angle,black,null,false,false,v->v.duoEffect=true);
+   // Remove both reflected light and attenuation before locating the gradient.
+   // This catches cosine sampling stretching a narrow strip across the left pane.
+   for(int x:new int[]{64,160,280}){
+    int base=Color.red(dark.getPixel(x,360));
+    double sampledX=(Color.red(refracted.getPixel(x,360))-base)*640.0/(Color.red(light.getPixel(x,360))-base);
+    assertEquals("Image width stays stable at "+angle+", x="+x,x,sampledX,8);
+   }
+   assertEquals("Right pane stays unchanged",gradient.getPixel(480,360),refracted.getPixel(480,360));
+   if(angle==120)assertTrue("Free edge is distinctly shaded while the hinge stays clear",Color.red(light.getPixel(280,360))-Color.red(light.getPixel(40,360))>=70);
+   refracted.recycle();light.recycle();dark.recycle();
+  }
+  Bitmap edge=horizontalEdge(),glass=render(true,120,edge,null,false,false,v->v.duoEffect=true);
+  int far=glassEdgeWidth(glass,40),near=glassEdgeWidth(glass,280);
+  assertTrue("Far edge has visible frost without losing every shape: "+far,far>=24&&far<=55);
+  assertTrue("Detail at the hinge stays readable: "+near,near<=4);
+  gradient.recycle();white.recycle();black.recycle();edge.recycle();glass.recycle();
+ }
+ private int glassEdgeWidth(Bitmap image,int x){
+  int low=Color.red(image.getPixel(x,180)),high=Color.red(image.getPixel(x,540)),first=-1,last=-1;
+  for(int y=180;y<=540;y++){
+   float amount=(Color.red(image.getPixel(x,y))-low)/(float)(high-low);
+   if(first<0&&amount>=.1f)first=y;if(last<0&&amount>=.9f)last=y;
+  }
+  assertTrue("Glass edge remains visible",first>=0&&last>=first);return last-first;
+ }
  @Test public void glassReversalsReuseTheSameFrameAtFullPanelSize()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
   int w=2448,h=1848;Bitmap source=PreviewActivity.sample(w,h);

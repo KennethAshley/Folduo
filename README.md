@@ -4,7 +4,7 @@ Animate the screen you are using as you open or close your Fold8. Folduo uses
 hinge-driven blur, keeps the active app task, and reveals it at the destination
 screen's size. Keep your existing launcher and saved wallpapers.
 
-**Experimental build:** `0.1.27-fold8.36` (77). The installed app is named
+**Experimental build:** `0.1.27-fold8.38` (79). The installed app is named
 **Folduo Fold8 Test**. This branch adapts [bunkaich/Folduo](https://github.com/bunkaich/Folduo)
 and includes an original glass renderer using Android’s native blur.
 
@@ -25,8 +25,8 @@ and includes an original glass renderer using Android’s native blur.
 
 ### 1. Install the app
 
-Download **Folduo-Fold8-0.1.27-fold8.36.apk** from the
-[Fold8 experimental release](https://github.com/KennethAshley/Folduo/releases/tag/fold8-v77).
+Download **Folduo-Fold8-0.1.27-fold8.38.apk** from the
+[Fold8 experimental release](https://github.com/KennethAshley/Folduo/releases/tag/fold8-v79).
 On your phone, open the APK and allow installation from that browser or file
 manager when Android asks. Only the app APK is needed; source-code archives and
 the development test APK are not needed for everyday use.
@@ -146,12 +146,11 @@ instructions; this English guide describes the current Fold8 branch.
   no internet permission, analytics, or ads. Shizuku is a separate privileged helper.
 
 The standalone app passed two user-operated Twitter fold cycles in build 75.
-Build 76 preserves those defaults and adds settings, with 56 unit checks and four
-settings/rendering checks passing. Build 77 replaces the renderer with native
-Gaussian frost and original glass projection; seven GPU rendering checks pass,
-including repeated reversals at the inner panel’s full resolution. Physical
-comparison of the new glass effect is pending. Alternate presets still need
-subjective tuning.
+Build 79 keeps app content at its normal width, with stronger frost and shading
+away from the hinge. The physical comparison confirmed that text kept its shape
+and the effect felt more like glass. Eight GPU rendering checks pass, including
+full-resolution reversals, alongside 56 unit checks. Alternate presets and other
+apps/devices still need broader testing.
 See [FOLD8.md](FOLD8.md) for verification details and development history.
 
 ## Build from source

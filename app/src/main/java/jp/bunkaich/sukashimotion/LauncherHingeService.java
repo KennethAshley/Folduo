@@ -91,7 +91,15 @@ public final class LauncherHingeService extends Service {
     }
     private void forward(int ticket,float degrees,long measuredAt,int source){
         if(stopped||ticket!=generation||!reading||!BridgeConnection.ownsAngles(this))return;
-        if(isReaderTermination(degrees,source)){reading=false;++generation;unavailable();return;}
+        if(isReaderTermination(degrees,source)){
+            // The health loop also changes reader state; serialize invalidation with it.
+            main.post(()->{
+                if(stopped||ticket!=generation||!reading)return;
+                ++generation;reading=false;
+                BridgeConnection.work.execute(this::unavailable);
+            });
+            return;
+        }
         feed.sample();broadcast(degrees,measuredAt,source);
     }
     private void initialUnavailable(IAngleSink listener){

@@ -38,7 +38,7 @@ final class BridgeConnection {
         work.execute(()->{synchronized(BridgeConnection.class){try{if(args!=null)Shizuku.unbindUserService(args,connection,true);}catch(Exception ignored){}finally{bridge=null;angleOwner=null;binding=false;nextAttempt=0;failures=0;}}});
     }
     static synchronized boolean startAngles(Object owner,IShellBridge target,IAngleSink sink,boolean replace)throws RemoteException{
-        if(!replace&&angleOwner!=null&&angleOwner!=owner)return false;
+        if(!canStartAngles(angleOwner,owner,replace))return false;
         angleOwner=owner;
         try{target.startAngles(sink);return true;}catch(RemoteException e){if(angleOwner==owner)angleOwner=null;throw e;}
     }
@@ -47,4 +47,5 @@ final class BridgeConnection {
         try{target.stopAngles();}finally{angleOwner=null;}
     }
     static synchronized boolean ownsAngles(Object owner){return angleOwner==owner;}
+    static boolean canStartAngles(Object current,Object requested,boolean replace){return replace||current==null||current==requested;}
 }

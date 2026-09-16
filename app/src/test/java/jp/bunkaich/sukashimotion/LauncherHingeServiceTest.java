@@ -15,4 +15,21 @@ public class LauncherHingeServiceTest {
         assertFalse(LauncherHingeService.available(false,true));
         assertFalse(LauncherHingeService.available(true,true));
     }
+    @Test public void unavailableIsEmittedOnceUntilANormalSampleRestoresTheFeed(){
+        assertEquals(-1,LauncherHingeService.FEED_UNAVAILABLE);
+        LauncherHingeService.FeedState feed=new LauncherHingeService.FeedState();
+        assertTrue(feed.needsInitial());
+        assertTrue(feed.unavailable());
+        assertFalse(feed.unavailable());
+        feed.sample();
+        assertFalse(feed.needsInitial());
+        assertTrue(feed.unavailable());
+    }
+    @Test public void onlyInteractiveOwnersCanReplaceAnotherReader(){
+        Object launcher=new Object(),interactive=new Object();
+        assertTrue(BridgeConnection.canStartAngles(null,launcher,false));
+        assertTrue(BridgeConnection.canStartAngles(launcher,launcher,false));
+        assertFalse(BridgeConnection.canStartAngles(interactive,launcher,false));
+        assertTrue(BridgeConnection.canStartAngles(launcher,interactive,true));
+    }
 }

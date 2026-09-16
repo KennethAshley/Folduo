@@ -7,6 +7,7 @@ import android.os.*;
 /** Signature-protected, read-only hinge feed for the paired launcher. */
 public final class LauncherHingeService extends Service {
     static final String LAUNCHER_PACKAGE="de.mm20.launcher2.fold8";
+    static final int FEED_UNAVAILABLE=-1; // Launcher-only sentinel; degrees are ignored.
     private static final String PERMISSION="jp.bunkaich.sukashimotion.permission.LAUNCHER_HINGE";
     private final Handler main=new Handler(Looper.getMainLooper());
     private final Object clientLock=new Object();
@@ -14,6 +15,15 @@ public final class LauncherHingeService extends Service {
     private volatile IShellBridge bound;
     private volatile boolean reading,stopped;
     private volatile int generation;
+    private final FeedState feed=new FeedState();
+
+    static final class FeedState {
+        private boolean available,publishedUnavailable;
+        boolean needsInitial(){return !available;}
+        void sample(){available=true;publishedUnavailable=false;}
+        boolean unavailable(){boolean notify=available||!publishedUnavailable;available=false;publishedUnavailable=true;return notify;}
+        void initialSent(){publishedUnavailable=true;}
+    }
 
     private RemoteCallbackList<IAngleSink> clientList(){
         return new RemoteCallbackList<>(){
@@ -26,7 +36,7 @@ public final class LauncherHingeService extends Service {
             enforceLauncher();
             if(listener==null||RevealService.running||MotionService.running)return false;
             boolean added; synchronized(clientLock){added=clients.register(listener);}
-            if(added)main.post(LauncherHingeService.this::refresh);
+            if(added){BridgeConnection.work.execute(()->initialUnavailable(listener));main.post(LauncherHingeService.this::refresh);}
             return added;
         }
         @Override public void unregisterListener(IAngleSink listener){
@@ -74,12 +84,22 @@ public final class LauncherHingeService extends Service {
             try{
                 boolean started=!stopped&&ticket==generation&&bound==bridge&&hasClients()&&available(RevealService.running,MotionService.running)
                     &&BridgeConnection.startAngles(LauncherHingeService.this,bridge,relay,false);
-                if(!started)main.post(()->{if(ticket==generation)reading=false;});
-            }catch(Exception ignored){main.post(()->{if(ticket==generation){reading=false;bound=null;}});}
+                if(!started){unavailable();main.post(()->{if(ticket==generation)reading=false;});}
+            }catch(Exception ignored){unavailable();main.post(()->{if(ticket==generation){reading=false;bound=null;}});}
         });
     }
     private void forward(int ticket,float degrees,long measuredAt,int source){
         if(stopped||ticket!=generation||!reading||!BridgeConnection.ownsAngles(this))return;
+        feed.sample();broadcast(degrees,measuredAt,source);
+    }
+    private void initialUnavailable(IAngleSink listener){
+        if(!feed.needsInitial())return;
+        try{listener.angle(0,SystemClock.elapsedRealtime(),FEED_UNAVAILABLE);}catch(RemoteException ignored){}finally{feed.initialSent();}
+    }
+    private void unavailable(){
+        if(feed.unavailable())broadcast(0,SystemClock.elapsedRealtime(),FEED_UNAVAILABLE);
+    }
+    private void broadcast(float degrees,long measuredAt,int source){
         RemoteCallbackList<IAngleSink> list=clients;int count=list.beginBroadcast();
         try{for(int i=0;i<count;i++)try{list.getBroadcastItem(i).angle(degrees,measuredAt,source);}catch(RemoteException ignored){}}
         finally{list.finishBroadcast();}
@@ -87,7 +107,7 @@ public final class LauncherHingeService extends Service {
     private void detach(){
         IShellBridge previous=bound;if(previous==null&&!reading)return;
         bound=null;reading=false;++generation;
-        if(previous!=null)BridgeConnection.work.execute(()->{try{BridgeConnection.stopAngles(LauncherHingeService.this,previous);}catch(Exception ignored){}});
+        BridgeConnection.work.execute(()->{unavailable();if(previous!=null)try{BridgeConnection.stopAngles(LauncherHingeService.this,previous);}catch(Exception ignored){}});
     }
     @Override public void onDestroy(){
         stopped=true;main.removeCallbacksAndMessages(null);detach();

@@ -13,6 +13,7 @@ import java.util.concurrent.*;
 
 /** Shizuku UserService: shell authority stays in this process, not in the UI. */
 public final class ShellBridge extends IShellBridge.Stub {
+    static final int READER_UNAVAILABLE=-1; // Internal NaN event; normal angle consumers reject it.
     private final ScheduledExecutorService life=Executors.newSingleThreadScheduledExecutor();
     private final ExecutorService launchJobs=Executors.newSingleThreadExecutor();
     private SecondaryLaunchListener launchListener;
@@ -104,6 +105,12 @@ public final class ShellBridge extends IShellBridge.Stub {
         if(generation!=angleGeneration||target==null||!Float.isFinite(angle)||angle<0||angle>180)return;
         try{target.angle(angle,measuredAt,source);}catch(RemoteException e){stopInternal();releaseInternal();}
     }
+    static boolean unexpectedReaderStop(int startedGeneration,int currentGeneration,boolean active){return active&&startedGeneration==currentGeneration;}
+    private void readerStopped(int generation){
+        IAngleSink target=sink;
+        if(!unexpectedReaderStop(generation,angleGeneration,target!=null))return;
+        try{target.angle(Float.NaN,SystemClock.elapsedRealtime(),READER_UNAVAILABLE);}catch(RemoteException e){stopInternal();releaseInternal();}
+    }
     private void startLogReader(int generation){
         new Thread(()->{
             long started=System.currentTimeMillis(), startedElapsed=SystemClock.elapsedRealtime();
@@ -129,7 +136,11 @@ public final class ShellBridge extends IShellBridge.Stub {
                     }
                 }
             }catch(Exception e){if(generation==angleGeneration)error=message(e);}
-            finally{if(process!=null)process.destroy();}
+            finally{
+                if(process!=null)process.destroy();
+                synchronized(this){if(logReader==process)logReader=null;}
+                readerStopped(generation);
+            }
         },"motion-angle-reader").start();
     }
     @Override public void stopAngles(){authorize();long token=Binder.clearCallingIdentity();try{stopInternal();}finally{Binder.restoreCallingIdentity(token);}}

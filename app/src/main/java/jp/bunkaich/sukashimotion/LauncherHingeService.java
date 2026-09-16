@@ -7,7 +7,7 @@ import android.os.*;
 /** Signature-protected, read-only hinge feed for the paired launcher. */
 public final class LauncherHingeService extends Service {
     static final String LAUNCHER_PACKAGE="de.mm20.launcher2.fold8";
-    static final int FEED_UNAVAILABLE=-1; // Launcher-only sentinel; degrees are ignored.
+    static final int FEED_UNAVAILABLE=ShellBridge.READER_UNAVAILABLE; // Launcher-only sentinel; degrees are ignored.
     private static final String PERMISSION="jp.bunkaich.sukashimotion.permission.LAUNCHER_HINGE";
     private final Handler main=new Handler(Looper.getMainLooper());
     private final Object clientLock=new Object();
@@ -63,6 +63,7 @@ public final class LauncherHingeService extends Service {
         return false;
     }
     static boolean available(boolean revealRunning,boolean motionRunning){return !revealRunning&&!motionRunning;}
+    static boolean isReaderTermination(float degrees,int source){return source==FEED_UNAVAILABLE&&!Float.isFinite(degrees);}
 
     private boolean hasClients(){synchronized(clientLock){return clients.getRegisteredCallbackCount()>0;}}
     private final Runnable health=new Runnable(){@Override public void run(){
@@ -90,6 +91,7 @@ public final class LauncherHingeService extends Service {
     }
     private void forward(int ticket,float degrees,long measuredAt,int source){
         if(stopped||ticket!=generation||!reading||!BridgeConnection.ownsAngles(this))return;
+        if(isReaderTermination(degrees,source)){reading=false;++generation;unavailable();return;}
         feed.sample();broadcast(degrees,measuredAt,source);
     }
     private void initialUnavailable(IAngleSink listener){

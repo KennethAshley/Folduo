@@ -32,4 +32,12 @@ public class LauncherHingeServiceTest {
         assertFalse(BridgeConnection.canStartAngles(interactive,launcher,false));
         assertTrue(BridgeConnection.canStartAngles(launcher,interactive,true));
     }
+    @Test public void onlyTheCurrentActiveReaderReportsUnexpectedTermination(){
+        assertTrue(ShellBridge.unexpectedReaderStop(7,7,true));
+        assertFalse(ShellBridge.unexpectedReaderStop(7,8,true));
+        assertFalse(ShellBridge.unexpectedReaderStop(7,7,false));
+        assertTrue(LauncherHingeService.isReaderTermination(Float.NaN,-1));
+        assertFalse(LauncherHingeService.isReaderTermination(0,-1));
+        assertFalse(LauncherHingeService.isReaderTermination(Float.NaN,HardwareAngle.SOURCE));
+    }
 }

@@ -11,6 +11,7 @@ import java.util.function.BiConsumer;
 /** Transparent task content above the selected inner Home wallpaper. */
 final class InnerWorkspace implements AutoCloseable {
     private final WindowManager window;private final FrameLayout root;
+    private SnapshotSurface cover;
     private boolean closed;
     InnerWorkspace(Context context,Bitmap wallpaper,IShellBridge bridge,BiConsumer<Surface,SurfaceControl> ready,Consumer<Exception> failed){
         window=context.getSystemService(WindowManager.class);root=new FrameLayout(context);
@@ -28,5 +29,17 @@ final class InnerWorkspace implements AutoCloseable {
         lp.setFitInsetsTypes(0);lp.layoutInDisplayCutoutMode=WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;lp.setTitle("Folduo inner workspace");
         try{window.addView(root,lp);}catch(RuntimeException e){close();throw e;}
     }
-    @Override public void close(){closed=true;if(root.isAttachedToWindow())window.removeViewImmediate(root);}
+    void cover(Bitmap frame,Runnable ready){
+        if(closed)return;
+        if(cover!=null){cover.image.setFrame(FrameTexture.sharp(frame));cover.image.afterFrame(ready);return;}
+        Context local=root.getContext();
+        SnapshotView image=new SnapshotView(local,FrameTexture.sharp(frame),true,false);
+        image.duoEffect=true;image.setLayoutMask(1);image.setAngle(0);
+        SnapshotSurface next=new SnapshotSurface(local,image,()->{if(!closed&&cover!=null&&cover.image==image)ready.run();});
+        WindowManager.LayoutParams lp=MotionService.snapshotLayout();lp.setTitle("Folduo prepared inner frame");
+        window.addView(next,lp);cover=next;
+    }
+    SurfaceControl coveredSurface(){return cover==null?null:cover.getSurfaceControl();}
+    void uncover(){if(cover!=null){SnapshotSurface old=cover;cover=null;try{window.removeViewImmediate(old);}catch(IllegalArgumentException alreadyRemoved){/* Display teardown already removed this window. */}}}
+    @Override public void close(){closed=true;uncover();if(root.isAttachedToWindow())window.removeViewImmediate(root);}
 }

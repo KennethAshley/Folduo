@@ -1,5 +1,6 @@
 package jp.bunkaich.sukashimotion;
 
+import android.animation.*;
 import android.app.*;
 import android.content.*;
 import android.graphics.*;
@@ -25,9 +26,13 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private volatile int generation,sessionSerial;private volatile boolean stopped;private boolean paused=true,busy,frameScheduled,blockedUntilEndpoint,finishing;private String panelSignature="";
     private long angleStartedAt,angleSession,retryAt;private int recoveries;private UiText lastRecovery=UiText.raw("");private String notificationText="";
     private boolean layoutPrepared,layoutPreparing,layoutRecovering,fixedPrimaryInner;
+    private boolean duoTrial;
+    private float outerDarkness;private boolean outerFollowsHinge,outerPortraitReady=true;
+    private int outerCommandGeneration=-1;private Runnable afterOuterBlack;
     private IShellBridge bound;private FoldPolicy policy;private float target=Float.NaN,smoothed=Float.NaN;
     private LocaleList uiLocales;private InnerNavigation navigation;private String navigationError="";
     private InnerWorkspace workspace;private boolean mirrorReady,checkingMirror;private long mirrorCheckedAt;
+    private int warmingTicket=-1;private long warmedAt;
     private long measuredAt,lastFrame;private int source=-1;private DisplayManager displays;
     private final ArrayDeque<String> angleHistory=new ArrayDeque<>();
     private long layerSerial;private long acceptedAngles;private String anchorError="",stage="idle";
@@ -43,7 +48,12 @@ public final class MotionService extends Service implements DisplayManager.Displ
         Layer(WindowManager wm,SnapshotView view,SnapshotSurface root,int displayId,long serial){this.wm=wm;this.view=view;this.root=root;this.displayId=displayId;this.serial=serial;}
     }
     private void trace(String message){stage=message;if(handoffs.size()>=32)handoffs.removeFirst();handoffs.addLast(SystemClock.elapsedRealtime()+":"+message);}
-    private SurfaceControl[] excluded(){return layers.stream().map(l->l.root.getSurfaceControl()).filter(c->c!=null&&c.isValid()).toArray(SurfaceControl[]::new);}
+    private SurfaceControl[] excluded(){
+        ArrayList<SurfaceControl> surfaces=new ArrayList<>();
+        for(Layer layer:layers){SurfaceControl surface=layer.root.getSurfaceControl();if(surface!=null&&surface.isValid())surfaces.add(surface);}
+        SurfaceControl cover=workspace==null?null:workspace.coveredSurface();if(cover!=null&&cover.isValid())surfaces.add(cover);
+        return surfaces.toArray(SurfaceControl[]::new);
+    }
     @Override public IBinder onBind(Intent intent){return null;}
     @Override public void onCreate(){
         super.onCreate();uiLocales=getResources().getConfiguration().getLocales();running=true;status=UiText.of(R.string.preparing);
@@ -67,6 +77,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         String action=intent==null?"restore":intent.getAction();
         if("stop".equals(action)){MotionSettings.setEnabled(this,false);stopSelf();return START_NOT_STICKY;}
         if("restore".equals(action)&&!MotionSettings.enabled(this)){stopSelf();return START_NOT_STICKY;}
+        duoTrial=BuildConfig.DEBUG&&intent!=null&&intent.getBooleanExtra("duo_trial",false);
         MotionSettings.setEnabled(this,true);MotionSettings.recovery(this,"");
         if("restart".equals(action)){pause();recordRecovery(UiText.of(R.string.manual_restart));}
         resume();return START_STICKY;
@@ -115,6 +126,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
             controls.execute(()->{try{Bundle state=bridge.inspect();main.post(()->{checkingMirror=false;if(session==sessionSerial&&!state.getBoolean("mirrorActive"))fail(UiText.raw("Inner workspace stopped: "+state.getString("mirrorError","")));});}catch(Exception e){main.post(()->{checkingMirror=false;if(session==sessionSerial)fail(UiText.error(e));});}});
         }
         if(!paused&&!layoutPrepared&&!layoutPreparing&&source>=0&&Float.isFinite(target))prepareIfClosed();
+        warmInner();
         if(!paused&&layoutPrepared&&policy!=null&&policy.active&&Float.isFinite(target))handle(policy.update(target,SystemClock.elapsedRealtime(),source==HardwareAngle.SOURCE));
         updateNavigation();updateNotification();main.postDelayed(this,100);
     }};
@@ -185,12 +197,34 @@ public final class MotionService extends Service implements DisplayManager.Displ
                             if(stopped||session!=sessionSerial)return;
                             Bundle started=bridge.mirror(surface,parent,inner.w,inner.h,local.getResources().getDisplayMetrics().densityDpi);
                             if(!started.getBoolean("ok"))throw new IllegalStateException(started.getString("error"));
-                            main.post(()->{if(stopped||session!=sessionSerial)return;mirrorReady=true;layoutPrepared=true;layoutPreparing=false;policy=new FoldPolicy(false);trace("stable-mirror-ready");});
+                            main.post(()->{if(stopped||session!=sessionSerial)return;mirrorReady=true;policy=new FoldPolicy(false);
+                                if(duoTrial)warmInner();else{layoutPrepared=true;layoutPreparing=false;trace("stable-mirror-ready");}
+                            });
                         }catch(Exception e){main.post(()->{if(session==sessionSerial)fail(UiText.error(e));});}
                     }),error->{if(session==sessionSerial)fail(UiText.error(error));});
                 }catch(Exception e){fail(UiText.error(e));}
             });
         }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.error(e));});}});
+    }
+    private void warmInner(){
+        if(!duoTrial||stopped||paused||workspace==null||!mirrorReady||policy==null||policy.open||policy.active||busy||finishing||warmingTicket==generation)return;
+        // ponytail: refresh the fully frosted, hidden inner frame at 4 fps; a live
+        // texture renderer would avoid periodic captures if power measurements require it.
+        long now=SystemClock.elapsedRealtime();if(now-warmedAt<250)return;warmedAt=now;
+        int ticket=generation;warmingTicket=ticket;InnerWorkspace owner=workspace;IShellBridge bridge=bound;SurfaceControl[] exclude=excluded();
+        jobs.execute(()->{try{
+            if(stopped||ticket!=generation||bridge==null)return;
+            Bundle result=bridge.captureBehind(0,exclude);Bitmap image=result.getParcelable("frame",Bitmap.class);
+            if(image==null)throw new IllegalStateException(result.getString("error","@folduo/capture_failed"));
+            main.post(()->{
+                if(stopped||paused||ticket!=generation||workspace!=owner||policy.active||policy.open)return;
+                try{owner.cover(image,()->{
+                    if(stopped||ticket!=generation||workspace!=owner)return;
+                    if(layoutPreparing){layoutPrepared=true;layoutPreparing=false;trace("stable-mirror-covered-ready");}
+                });}catch(Exception e){fail(UiText.error(e));}
+            });
+        }catch(Exception e){main.post(()->{if(ticket==generation&&!stopped)fail(UiText.error(e));});}
+        finally{main.post(()->{if(warmingTicket==ticket)warmingTicket=-1;});}});
     }
     private void recoverLayoutIfNeeded(){
         if(stopped||paused||!layoutPrepared||layoutRecovering||bound==null)return;
@@ -218,6 +252,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private void transition(boolean opening){
         removeNavigation();
         int ticket=++generation;busy=true;finishing=false;for(Layer layer:layers){layer.root.animate().cancel();layer.root.setAlpha(1);}
+        afterOuterBlack=null;
         trace(opening?"opening-capture":"closing-capture");
         // Hide only icons (not inset sources), before taking the frozen image. A pair of
         // frames lets both SystemUI and the dismissed controls leave composition.
@@ -241,18 +276,18 @@ public final class MotionService extends Service implements DisplayManager.Displ
                 FrameTexture frame=cached;
                 if(frame==null){Bundle result=bridge.captureBehind(displayId,exclude);Bitmap bitmap=result.getParcelable("frame",Bitmap.class);if(bitmap==null)throw new IllegalStateException(result.getString("error","@folduo/capture_failed"));frame=FrameTexture.sharp(bitmap);}
                 FrameTexture ready=frame;
-                if(!frame.prepared)main.post(()->{
+                if(!duoTrial&&!frame.prepared)main.post(()->{
                     if(ticket!=generation||stopped)return;
-                    addLayer(outgoing,ready,true,ticket,()->trace("source-frame-committed"));
+                    addLayer(outgoing,ready,true,false,ticket,()->trace("source-frame-committed"));
                 });
-                FrameTexture texture=frame.prepared?frame:FrameTexture.prepare(frame.sharp,density,()->stopped||ticket!=generation);
+                FrameTexture texture=duoTrial||frame.prepared?frame:FrameTexture.prepare(frame.sharp,density,()->stopped||ticket!=generation);
                 main.post(()->{
                     if(ticket!=generation||stopped||texture==null)return;frozen.put(outgoingInner,texture);
-                    // The source starts deforming only after real blur levels are available.
+                    // Duo blurs on the GPU; only the legacy renderer needs CPU levels.
                     controls.execute(()->{try{
                         if(ticket!=generation||stopped)return;
                         Bundle hidden=bridge.statusIcons(true);if(!hidden.getBoolean("ok"))throw new IllegalStateException(hidden.getString("error"));
-                        main.post(()->{if(ticket==generation&&!stopped)addLayer(outgoing,texture,false,ticket,()->{trace("source-frost-committed");requestDisplays(ticket,opening);});});
+                        main.post(()->{if(ticket==generation&&!stopped)addLayer(outgoing,texture,false,false,ticket,()->{trace("source-frost-committed");requestDisplays(ticket,opening);});});
                     }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.of(R.string.status_icons_failed,UiText.error(e)));});}});
                 });
             }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.of(R.string.transition_cancelled,UiText.error(e)));});}
@@ -268,7 +303,30 @@ public final class MotionService extends Service implements DisplayManager.Displ
             main.postDelayed(()->requestDisplays(ticket,opening,attempt+1),40);return;
         }
         FrameTexture cached=frozen.get(opening),outgoing=frozen.get(!opening);
-        if(outgoing==null||!outgoing.prepared){fail(UiText.of(R.string.blur_unconfirmed));return;}
+        if(outgoing==null||!duoTrial&&!outgoing.prepared){fail(UiText.of(R.string.blur_unconfirmed));return;}
+        if(duoTrial&&!opening&&!outerPortraitReady&&outerDarkness==1){
+            // The native black layer already covers this destination. Reuse it
+            // instead of building a placeholder that cannot be seen underneath.
+            outerFollowsHinge=true;
+            sendOuterDarkness(1,ticket,()->{
+                trace("destination-black-covered-move-app");moveCoveredApp(ticket,false,source,destination);
+            });
+            return;
+        }
+        // Resizing display 0 also letterboxes its physical cover. Wait for hinge-driven
+        // black coverage while preparing the arriving inner frame in parallel.
+        boolean[] covered={false,!duoTrial||!opening};
+        Runnable move=()->{
+            if(stopped||ticket!=generation||!covered[0]||!covered[1])return;
+            if(duoTrial&&opening)outerPortraitReady=false;
+            if(opening&&workspace!=null)workspace.uncover();
+            trace("destination-covered-move-app");moveCoveredApp(ticket,opening,source,destination);
+        };
+        if(duoTrial){
+            outerFollowsHinge=true;
+            if(opening)afterOuterBlack=()->{covered[1]=true;move.run();};
+            scheduleFrame();
+        }
         // Cover the destination BEFORE moving the real app. Never expose its sharp
         // resized layout during capture/blur preparation, even for a single frame.
         jobs.execute(()->{try{
@@ -276,8 +334,8 @@ public final class MotionService extends Service implements DisplayManager.Displ
             FrameTexture cover=cached!=null?cached:outgoing.transfer(!opening,destination.w,destination.h);
             main.post(()->{
                 if(ticket!=generation||stopped)return;
-                addLayer(destination,cover,false,ticket,()->{
-                    trace("destination-covered-move-app");moveCoveredApp(ticket,opening,source,destination);
+                addLayer(destination,cover,false,duoTrial,ticket,()->{
+                    covered[0]=true;move.run();
                 });
             });
         }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.of(R.string.cover_failed,UiText.error(e)));});}});
@@ -301,7 +359,9 @@ public final class MotionService extends Service implements DisplayManager.Displ
         trace("both-panels-ready");
         // Both panels already have an opaque, frosted cover. Capture excludes those
         // owned surfaces without hiding them. A reversal can reuse the session's frame.
-        if(frozen.get(opening)!=null){linkFrames();busy=false;trace("paired-frames-ready");return;}
+        // A hinge reversal may precede the actual resize. Its source snapshot then
+        // contains the old layout, so the Duo reveal must capture the resized app.
+        if(!duoTrial&&frozen.get(opening)!=null){framesReady(ticket,opening);return;}
         awaitApp(ticket,incoming,()->captureDestination(ticket,opening));
     }
     private void awaitApp(int ticket,Panel panel,Runnable ready){
@@ -326,24 +386,66 @@ public final class MotionService extends Service implements DisplayManager.Displ
             Bundle result=bridge.captureBehind(id,exclude);Bitmap bitmap=result.getParcelable("frame",Bitmap.class);
             if(bitmap==null)throw new IllegalStateException(result.getString("error","@folduo/destination_capture_failed"));
             if(bitmap.getWidth()!=incoming.w||bitmap.getHeight()!=incoming.h)throw new IllegalStateException("@folduo/destination_resizing");
-            FrameTexture texture=FrameTexture.prepare(bitmap,density,()->ticket!=generation||stopped);
-            main.post(()->{if(ticket!=generation||stopped||texture==null)return;frozen.put(opening,texture);Panel destination=findPanel(opening,true);if(destination!=null)addLayer(destination,texture,false,ticket,()->{linkFrames();busy=false;trace("paired-frames-ready");scheduleFrame();});});
+            FrameTexture texture=duoTrial?FrameTexture.sharp(bitmap):FrameTexture.prepare(bitmap,density,()->ticket!=generation||stopped);
+            main.post(()->{if(ticket!=generation||stopped||texture==null)return;Panel destination=findPanel(opening,true);if(destination!=null)showDestination(destination,texture,ticket);});
         }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.of(R.string.destination_failed,UiText.error(e)));});}});
     }
-    private void addLayer(Panel panel,FrameTexture frame,boolean sharpHold,int ticket,Runnable ready){
+    private void showDestination(Panel panel,FrameTexture texture,int ticket){
+        Runnable ready=()->{frozen.put(panel.inner,texture);framesReady(ticket,panel.inner);};
+        Layer layer=duoTrial?layers.stream().filter(l->l.displayId==panel.display.getDisplayId()&&l.committed)
+            .max(Comparator.comparingLong(l->l.serial)).orElse(null):null;
+        if(layer==null){addLayer(panel,texture,false,false,ticket,ready);return;}
+        if(!panel.inner&&!outerPortraitReady&&outerDarkness==1){
+            // A reversal may leave an old snapshot beneath the opaque native cover.
+            // Commit the fresh portrait directly before allowing its hinge reveal.
+            trace("destination-frame-covered:cover");layer.view.setFrame(texture);layer.view.setLayoutMask(0);
+            layer.view.afterFrame(()->main.post(()->{if(!stopped&&ticket==generation&&layers.contains(layer))ready.run();}));
+            return;
+        }
+        // Blend pixels inside the already-visible surface. A new SurfaceView would
+        // expose the resized app for frames before its commit callback can fade it.
+        trace("destination-layout-blending:"+(panel.inner?"inner":"cover"));layer.view.setLayoutBlend(texture,0);
+        // ponytail: screenshot masking cannot animate an app's individual views;
+        // exchange layouts under frost, then reveal the already-resized app.
+        ValueAnimator blend=ValueAnimator.ofFloat(0,1);blend.setDuration(300);
+        blend.addUpdateListener(animation->{
+            if(stopped||ticket!=generation||!layers.contains(layer)){animation.cancel();return;}
+            float progress=(float)animation.getAnimatedValue();
+            layer.view.setLayoutBlend(texture,Math.min(1,progress*2));
+            layer.view.setLayoutMask(1-Math.max(0,progress*2-1));
+        });
+        blend.addListener(new AnimatorListenerAdapter(){@Override public void onAnimationEnd(Animator animation){
+            if(stopped||ticket!=generation||!layers.contains(layer))return;
+            layer.view.setFrame(texture);layer.view.setLayoutMask(0);
+            layer.view.afterFrame(()->main.post(()->{if(!stopped&&ticket==generation&&layers.contains(layer))ready.run();}));
+        }});
+        blend.start();
+    }
+    private void framesReady(int ticket,boolean inner){
+        Runnable ready=()->{if(stopped||ticket!=generation)return;linkFrames();busy=false;trace("paired-frames-ready");scheduleFrame();};
+        // Reveal the cover only after both its portrait geometry and pixels are ready.
+        if(duoTrial&&!inner)outerPortraitReady=true;
+        ready.run();
+    }
+    private void addLayer(Panel panel,FrameTexture frame,boolean sharpHold,boolean pendingLayout,int ticket,Runnable ready){
         if(frame==null)return;
         try{
             Context context=createDisplayContext(panel.display).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,null);
             WindowManager wm=context.getSystemService(WindowManager.class);
-            SnapshotView view=new SnapshotView(context,frame,panel.inner,false);view.logicalWidth=panel.w;view.setSharpHold(sharpHold);
+            SnapshotView view=new SnapshotView(context,frame,panel.inner,false);view.duoEffect=duoTrial;view.logicalWidth=panel.w;view.setSharpHold(sharpHold);
+            view.setLayoutMask(pendingLayout?1:0);
             if(!panel.inner)view.setRearFrame(frozen.get(true),false);
             Layer[] created=new Layer[1];SnapshotSurface root=new SnapshotSurface(context,view,()->main.post(()->{
                 Layer layer=created[0];if(ticket!=generation||stopped||!layers.contains(layer))return;
-                // A late callback from an older frame must not remove its successor.
-                if(layers.stream().anyMatch(l->l.displayId==layer.displayId&&l.serial>layer.serial&&l.committed)){removeLayer(layer);return;}
-                layer.committed=true;
-                for(Layer old:new ArrayList<>(layers))if(old.displayId==layer.displayId&&old.serial<layer.serial)removeLayer(old);
-                ready.run();
+                if(duoTrial&&!panel.inner){
+                    IShellBridge bridge=bound;SurfaceControl surface=layer.root.getSurfaceControl();
+                    controls.execute(()->{try{
+                        if(stopped||ticket!=generation)return;
+                        Bundle result=bridge.excludeFromMirror(surface);
+                        if(!result.getBoolean("ok"))throw new IllegalStateException(result.getString("error"));
+                        main.post(()->commitLayer(layer,ticket,ready));
+                    }catch(Exception e){main.post(()->{if(ticket==generation)fail(UiText.error(e));});}});
+                }else commitLayer(layer,ticket,ready);
             }));
             WindowManager.LayoutParams lp=snapshotLayout();
             Layer layer=new Layer(wm,view,root,panel.display.getDisplayId(),++layerSerial);created[0]=layer;layers.add(layer);
@@ -351,6 +453,14 @@ public final class MotionService extends Service implements DisplayManager.Displ
             // A missing frame callback must never leave a permanent frozen screen.
             main.postDelayed(()->{if(ticket==generation&&layers.contains(layer)&&!layer.committed)fail(UiText.of(R.string.frozen_draw_failed));},1400);
         }catch(Exception e){fail(UiText.of(R.string.overlay_failed,UiText.error(e)));}
+    }
+    private void commitLayer(Layer layer,int ticket,Runnable ready){
+        if(stopped||ticket!=generation||!layers.contains(layer)||layer.committed)return;
+        // A late callback from an older frame must not remove its successor.
+        if(layers.stream().anyMatch(l->l.displayId==layer.displayId&&l.serial>layer.serial&&l.committed)){removeLayer(layer);return;}
+        layer.committed=true;
+        for(Layer old:new ArrayList<>(layers))if(old.displayId==layer.displayId&&old.serial<layer.serial)removeLayer(old);
+        ready.run();
     }
     private void linkFrames(){
         FrameTexture inner=frozen.get(true);
@@ -373,7 +483,25 @@ public final class MotionService extends Service implements DisplayManager.Displ
         float dt=lastFrame==0?1/80f:(nanos-lastFrame)/1e9f;lastFrame=nanos;
         smoothed=FoldPolicy.smooth(smoothed,target,dt);if(Math.abs(smoothed-target)<.015f)smoothed=target;
         for(Layer layer:layers)layer.view.setAngle(smoothed);
-        if(smoothed!=target)scheduleFrame();
+        boolean shading=updateOuter(dt);
+        if(smoothed!=target||shading)scheduleFrame();
+    }
+    private boolean updateOuter(float dt){
+        if(!duoTrial||!outerFollowsHinge)return false;
+        // The angle sets opacity; readiness may only keep the cover darker. Never
+        // reveal the wide app while waiting for its portrait frame on a reversal.
+        float desired=outerPortraitReady?FoldPolicy.outerDarkness(smoothed):1;
+        float next=FoldPolicy.smooth(outerDarkness,desired,dt);
+        if(Math.abs(next-desired)<.001f)next=desired;
+        Runnable ready=null;
+        if(next==1&&afterOuterBlack!=null){
+            ready=afterOuterBlack;afterOuterBlack=null;
+            // Hold black after committing to a resize, including the interval while
+            // its destination frame is still being attached.
+            outerPortraitReady=false;
+        }
+        if(next!=outerDarkness||outerCommandGeneration!=generation||ready!=null)sendOuterDarkness(next,generation,ready);
+        return next!=desired;
     }
     private void finish(){finishWhenReady(generation,0);}
     private void finishWhenReady(int expected,int attempt){
@@ -393,14 +521,40 @@ public final class MotionService extends Service implements DisplayManager.Displ
         if(stopped||ticket!=generation)return;rebuildPanels();Panel destination=findPanel(inner,true);
         if(destination==null){if(attempt>=35){fail(UiText.of(R.string.app_destination_unconfirmed));return;}main.postDelayed(()->awaitFinal(ticket,inner,attempt+1),40);return;}
         awaitApp(ticket,destination,()->{
-            trace("handoff-with-stable-panels");
-            for(Layer layer:layers)layer.root.animate().alpha(0).setDuration(180).setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator()).start();
-            main.postDelayed(()->{if(ticket!=generation)return;removeLayers();frozen.clear();finishing=false;smoothed=target;restoreStatusIcons();trace("idle");updateNavigation();
-            },200);
+            Runnable reveal=()->{
+                if(stopped||ticket!=generation)return;
+                trace("handoff-with-stable-panels");
+                // Keep the outgoing portrait opaque until the independent black layer
+                // covers it. Fading both exposes the wide live app between the layers.
+                for(Layer layer:layers)if(!duoTrial||!inner||layer.view.inner)layer.root.animate().alpha(0).setDuration(180).setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator()).start();
+                boolean[] settled={false,!duoTrial};
+                Runnable done=()->{if(stopped||ticket!=generation||!settled[0]||!settled[1])return;removeLayers();frozen.clear();finishing=false;smoothed=target;restoreStatusIcons();trace("idle");updateNavigation();};
+                if(duoTrial)sendOuterDarkness(inner?1:0,ticket,()->{settled[1]=true;done.run();});
+                main.postDelayed(()->{
+                    if(stopped||ticket!=generation)return;
+                    for(Layer layer:new ArrayList<>(layers))if(!duoTrial||!inner||layer.view.inner)removeLayer(layer);
+                    settled[0]=true;done.run();
+                },200);
+            };
+            FrameTexture cover=frozen.get(false);
+            if(duoTrial&&!inner&&workspace!=null&&cover!=null){
+                try{workspace.cover(cover.sharp,reveal);}catch(Exception e){fail(UiText.error(e));}
+            }else reveal.run();
         });
+    }
+    private void sendOuterDarkness(float amount,int ticket,Runnable done){
+        IShellBridge bridge=bound;outerDarkness=amount;outerCommandGeneration=ticket;
+        controls.execute(()->{try{
+            if(stopped||ticket!=generation)return;
+            Bundle result=bridge.outerDarkness(amount);
+            if(!result.getBoolean("ok"))throw new IllegalStateException(result.getString("error"));
+            // Acknowledge composition before resizing or removing the covered frame.
+            if(done!=null)main.postDelayed(()->{if(!stopped&&ticket==generation)done.run();},34);
+        }catch(Exception e){main.post(()->{if(!stopped&&ticket==generation)fail(UiText.error(e));});}});
     }
     private void cancelSession(){
         ++generation;++sessionSerial;busy=false;finishing=false;layoutPrepared=layoutPreparing=layoutRecovering=false;removeNavigation();removeLayers();frozen.clear();
+        afterOuterBlack=null;outerFollowsHinge=false;outerPortraitReady=true;outerDarkness=0;outerCommandGeneration=-1;
         mirrorReady=false;checkingMirror=false;if(workspace!=null){workspace.close();workspace=null;}
         if(policy!=null)policy.active=false;
         IShellBridge bridge=bound;if(bridge!=null)controls.execute(()->{try{bridge.release();}catch(Exception ignored){}});
@@ -487,6 +641,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
     private void removeLayer(Layer layer){layers.remove(layer);layer.root.animate().cancel();try{layer.wm.removeViewImmediate(layer.root);}catch(Exception ignored){}}
     private void removeLayers(){for(Layer layer:new ArrayList<>(layers))removeLayer(layer);}
     @Override protected void dump(FileDescriptor fd,PrintWriter out,String[] args){
+        out.println("duoTrial="+duoTrial);
         out.println("running="+running+" paused="+paused+" unlocked="+unlocked()+" status="+status.resolve(this));
         out.println("enabled="+MotionSettings.enabled(this)+" recoveries="+recoveries+" lastRecovery="+lastRecovery.resolve(this));
         out.println("source="+source+" target="+target+" smoothed="+smoothed+" ageMs="+(SystemClock.elapsedRealtime()-measuredAt)+" accepted="+acceptedAngles);

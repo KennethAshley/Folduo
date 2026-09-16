@@ -28,6 +28,7 @@ public final class ShellBridge extends IShellBridge.Stub {
     private volatile float hardwareAngle = Float.NaN;
     private String error=""; private DualDisplayControl displayControl;private TaskDisplayRouter taskRouter;private StatusBarControl bars;
     private WorkspaceMirror mirror;
+    private SurfaceControl outerShade;private float outerDarkness;
     public ShellBridge() { this(null); }
     public ShellBridge(Context ignored) {
         try {
@@ -60,11 +61,15 @@ public final class ShellBridge extends IShellBridge.Stub {
             b.putLong("hardwareAngleEvents",hardwareEvents);b.putFloat("hardwareAngle",hardwareAngle);
             b.putLong("hardwareAngleAgeMs",hardwareAt==0?-1:SystemClock.elapsedRealtime()-hardwareAt);
             b.putBoolean("statusIconsHidden",bars!=null&&bars.hidden());
-            synchronized(this){b.putBoolean("mirrorActive",mirror!=null&&mirror.active());b.putString("mirrorError",mirror==null?"":mirror.error());}
+            synchronized(this){b.putBoolean("mirrorActive",mirror!=null&&mirror.active());b.putString("mirrorError",mirror==null?"":mirror.error());b.putFloat("outerDarkness",outerDarkness);b.putBoolean("outerShadeActive",outerShade!=null&&outerShade.isValid());}
             synchronized(this){b.putBoolean("routingInnerLaunches",launchListener!=null);b.putInt("launchRecoveries",launchRecoveries);b.putString("launchRecoveryError",launchRecoveryError);}
             b.putBoolean("samsungPermission",context!=null&&context.checkSelfPermission("com.samsung.permission.SSENSOR")==android.content.pm.PackageManager.PERMISSION_GRANTED);
             synchronized(sensors){ArrayList<Bundle> copy=new ArrayList<>();for(Bundle row:sensors)copy.add(new Bundle(row));b.putParcelableArrayList("sensors",copy);}
-            try { b.putString("display",control().describe());b.putString("baseState",control().baseName());b.putBoolean("powerLocked",control().isPowerPinned()); } catch(Exception e){b.putString("display",message(e));}
+            try {
+                DualDisplayControl c=control();
+                b.putString("display",c.describe());b.putString("baseState",c.baseName());b.putBoolean("powerLocked",c.isPowerPinned());
+                b.putInt("currentState",c.currentState());b.putInt("coverState",c.outerState);b.putInt("closedState",c.nativeOuterState);
+            } catch(Exception e){b.putString("display",message(e));}
             return b;
         } finally { Binder.restoreCallingIdentity(token); }
     }
@@ -92,8 +97,10 @@ public final class ShellBridge extends IShellBridge.Stub {
                             }
                         }
                     };
-                    try{boolean ok=sensorManager.registerListener(listener,sensor,20000,0,handler);row.putBoolean("registered",ok);if(ok)listeners.add(listener);}
-                    catch(Exception e){row.putString("error",message(e));}
+                    // registerListener can deliver a callback before it returns.
+                    // Every write to the published Bundle needs the same lock.
+                    try{boolean ok=sensorManager.registerListener(listener,sensor,20000,0,handler);synchronized(sensors){row.putBoolean("registered",ok);}if(ok)listeners.add(listener);}
+                    catch(Exception e){synchronized(sensors){row.putString("error",message(e));}}
                     synchronized(sensors){sensors.add(row);}
                 }
             }
@@ -180,6 +187,10 @@ public final class ShellBridge extends IShellBridge.Stub {
     @Override public void release(){authorize();long token=Binder.clearCallingIdentity();try{releaseInternal();}finally{Binder.restoreCallingIdentity(token);}}
     private synchronized void releaseInternal(){
         stopLaunchRouting();
+        if(outerShade!=null){
+            try(var tx=new SurfaceControl.Transaction()){tx.setVisibility(outerShade,false).reparent(outerShade,null).apply();}
+            catch(Exception e){error=message(e);}finally{outerShade.release();outerShade=null;outerDarkness=0;}
+        }
         if(mirror!=null){mirror.close();mirror=null;}
         try{if(bars!=null)bars.hide(false);}catch(Exception e){error=message(e);}
         try{if(taskRouter!=null&&displayControl!=null&&displayControl.isOwned())taskRouter.restore();}catch(Exception e){error=message(e);}
@@ -224,6 +235,46 @@ public final class ShellBridge extends IShellBridge.Stub {
         authorize();long identity=Binder.clearCallingIdentity();Bundle result=new Bundle();
         try{if(mirror==null)throw new IllegalStateException("Mirror is unavailable");mirror.workspace(inner);result.putBoolean("ok",true);}
         catch(Exception e){result.putString("error",message(e));}finally{Binder.restoreCallingIdentity(identity);}return result;
+    }
+    @Override public synchronized Bundle excludeFromMirror(SurfaceControl surface){
+        authorize();long identity=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{
+            if(sink==null||mirror==null||!mirror.active()||displayControl==null||!displayControl.isOwned())throw new IllegalStateException("Display control is unavailable");
+            if(surface==null||!surface.isValid())throw new IllegalArgumentException("Invalid outer snapshot surface");
+            try(var tx=new SurfaceControl.Transaction()){
+                tx.getClass().getMethod("setSkipScreenshot",SurfaceControl.class,boolean.class).invoke(tx,surface,true);tx.apply();
+            }
+            result.putBoolean("ok",true);
+        }catch(Exception e){result.putString("error",message(e));}
+        finally{if(surface!=null)surface.release();Binder.restoreCallingIdentity(identity);}return result;
+    }
+    @Override public synchronized Bundle outerDarkness(float amount){
+        authorize();long identity=Binder.clearCallingIdentity();Bundle result=new Bundle();
+        try{
+            if(!Float.isFinite(amount)||amount<0||amount>1)throw new IllegalArgumentException("Invalid outer darkness");
+            // Samsung can cancel our display request at full closure. Clearing or
+            // reducing our existing shade must remain possible during that handoff.
+            if(amount>0&&(outerShade==null||amount>outerDarkness)
+                &&(sink==null||mirror==null||!mirror.active()||displayControl==null||!displayControl.isOwned()))throw new IllegalStateException("Display control is unavailable");
+            if(outerShade==null&&amount>0){
+                Object builder=Class.forName("android.view.SurfaceControl$Builder").getConstructor().newInstance();
+                builder.getClass().getMethod("setName",String.class).invoke(builder,"Folduo outer endpoint");
+                builder.getClass().getMethod("setColorLayer").invoke(builder);
+                outerShade=(SurfaceControl)builder.getClass().getMethod("build").invoke(builder);
+                var display=context.getSystemService(android.hardware.display.DisplayManager.class).getDisplay(0);
+                int stack=(int)android.view.Display.class.getMethod("getLayerStack").invoke(display);
+                // A compositor layer has no input window and sits outside the window tree
+                // mirrored inside. An opaque app overlay would block forwarded inner taps.
+                try(var tx=new SurfaceControl.Transaction()){
+                    tx.getClass().getMethod("setLayerStack",SurfaceControl.class,int.class).invoke(tx,outerShade,stack);
+                    tx.getClass().getMethod("setColor",SurfaceControl.class,float[].class).invoke(tx,outerShade,new float[]{0,0,0});
+                    tx.setLayer(outerShade,Integer.MAX_VALUE).setCrop(outerShade,new android.graphics.Rect(0,0,4096,4096)).setAlpha(outerShade,0).apply();
+                }
+            }
+            if(outerShade!=null)try(var tx=new SurfaceControl.Transaction()){tx.setAlpha(outerShade,amount).setVisibility(outerShade,amount>0).apply();}
+            outerDarkness=amount;result.putBoolean("ok",true);
+        }catch(Exception e){result.putString("error",message(e));}
+        finally{Binder.restoreCallingIdentity(identity);}return result;
     }
     @Override public synchronized void mirrorTouch(android.view.MotionEvent event,int width,int height){
         authorize();long identity=Binder.clearCallingIdentity();

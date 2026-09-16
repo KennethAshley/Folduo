@@ -25,5 +25,7 @@ interface IShellBridge {
  Bundle innerWallpaper() = 17;
  Bundle holdNative(boolean inner) = 18;
  Bundle holdPaired(boolean innerPrimary) = 19;
+ Bundle excludeFromMirror(in SurfaceControl surface) = 20;
+ Bundle outerDarkness(float amount) = 21;
  void destroy() = 16777114;
 }

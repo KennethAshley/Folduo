@@ -32,6 +32,8 @@ public class ServiceLifecycleTest {
   public Bundle hold(boolean inner,int previousOwner){holds++;if(holdEntered!=null){holdEntered.countDown();try{allowHold.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}}Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
   public Bundle holdNative(boolean inner){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
   public Bundle holdPaired(boolean inner){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public Bundle excludeFromMirror(android.view.SurfaceControl surface){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
+  public Bundle outerDarkness(float amount){Bundle b=new Bundle();b.putBoolean("ok",true);return b;}
   public void release(){releases++;}public void heartbeat(){}public void startAngles(IAngleSink sink){this.sink=sink;starts++;}public void stopAngles(){if(stopEntered!=null){stopEntered.countDown();try{allowStop.await(3,TimeUnit.SECONDS);}catch(InterruptedException e){Thread.currentThread().interrupt();}}sink=null;}public void destroy(){}
  }
  interface Check { boolean ok(); }

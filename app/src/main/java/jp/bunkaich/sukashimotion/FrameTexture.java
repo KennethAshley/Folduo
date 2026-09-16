@@ -27,8 +27,14 @@ final class FrameTexture {
         return transfer(sourceInner,width,height,false);
     }
     FrameTexture transfer(boolean sourceInner,int width,int height,boolean leftPane){
-        if(!prepared)throw new IllegalStateException("Frost textures are not ready");
-        Bitmap mapped=map(sharp,sourceInner,width,height,leftPane);Bitmap[] blurred=new Bitmap[levels.length];
+        // The Duo shader blurs the sharp image itself. Transfer that image without
+        // building or remapping the legacy renderer's six CPU blur levels.
+        Bitmap readable=sharp.getConfig()==Bitmap.Config.HARDWARE?sharp.copy(Bitmap.Config.ARGB_8888,false):sharp;
+        if(readable==null)throw new IllegalStateException("Snapshot copy unavailable");
+        Bitmap mapped;
+        try{mapped=map(readable,sourceInner,width,height,leftPane);}finally{if(readable!=sharp)readable.recycle();}
+        if(!prepared)return sharp(mapped);
+        Bitmap[] blurred=new Bitmap[levels.length];
         float scale=levels[0].getHeight()/(float)sharp.getHeight();
         for(int i=0;i<levels.length;i++)blurred[i]=map(levels[i],sourceInner,Math.max(1,Math.round(width*scale)),Math.max(1,Math.round(height*scale)),leftPane);
         return new FrameTexture(mapped,blurred,true);

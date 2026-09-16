@@ -3,6 +3,12 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 import static jp.bunkaich.sukashimotion.FoldPolicy.Change.*;
 public class FoldPolicyTest {
+ @Test public void outerFadeUsesAngleInBothDirections(){
+  assertEquals(0,FoldPolicy.outerDarkness(0),0);assertEquals(0,FoldPolicy.outerDarkness(45),0);
+  assertEquals(.4f,FoldPolicy.outerDarkness(75),.0001f);assertEquals(.6f,FoldPolicy.outerDarkness(90),.0001f);
+  assertEquals(1,FoldPolicy.outerDarkness(120),0);assertEquals(1,FoldPolicy.outerDarkness(180),0);
+  assertTrue(FoldPolicy.outerDarkness(60)<FoldPolicy.outerDarkness(75));
+ }
  @Test public void hardwareLogEndpointsFinishWithoutExactZeroOr180(){
   FoldPolicy p=new FoldPolicy(false);
   assertEquals(NONE,p.update(9,0,true));assertEquals(OPEN,p.update(20,10,true));

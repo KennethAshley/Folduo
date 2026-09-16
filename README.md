@@ -2,19 +2,24 @@
 
 This fork adapts [bunkaich/Folduo](https://github.com/bunkaich/Folduo) for the
 Galaxy Z Fold8 **SM-F971U**, tested on Android 17 / One UI 9.0. Current version:
-**0.1.21-fold8.21** (build 62).
+**0.1.27-fold8.33** (build 74), accepted experimental Twitter trial.
 
-- Keeps your selected launcher, separate wallpapers, and native navigation.
-- Uses Shizuku to show opposing blur on both screens during folding, then reveal
-  the active app at the destination screen's size.
-- Closing blends into a native cover-sized image; visual tuning is still in progress.
+- Keeps the selected launcher and saved wallpapers. The active trial uses custom
+  inner-screen navigation and keeps both displays available through Shizuku.
+- Animates app snapshots with GPU blur and hinge-driven cover shading. The same
+  Twitter task changes between cover and inner dimensions.
+- Reveals the actual portrait frame sooner when closing. Fast folds can still
+  outrun preparation; battery use and other apps need further testing.
+- The accepted effect currently runs through the opt-in debug test below, with a
+  user-operated Start button, notification Stop, and a ten-minute session limit.
+  The normal Enable button is a separate, older animation path.
 
 See [FOLD8.md](FOLD8.md) for implementation details, build commands, verified
 checks, and remaining limitations. Diagnostic logs referenced there are local
 development artifacts and are not included in this repository.
 
 **The documentation and downloads below describe the upstream Fold7 version.**
-Its stock-wallpaper setup and custom inner navigation do not describe this fork.
+Use the Fold8 instructions in [FOLD8.md](FOLD8.md) for this experimental branch.
 
 ---
 

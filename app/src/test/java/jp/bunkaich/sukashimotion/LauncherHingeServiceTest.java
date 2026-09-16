@@ -9,6 +9,11 @@ public class LauncherHingeServiceTest {
         assertFalse(LauncherHingeService.ownsLauncher(null));
         assertFalse(LauncherHingeService.ownsLauncher(new String[]{"de.mm20.launcher2","de.mm20.launcher2.fold8.fake"}));
     }
+    @Test public void permitsThePairedFineAngleTrialButNotTheUnmodifiedDemo(){
+        assertTrue(LauncherHingeService.ownsLauncher(new String[]{"com.example.duofold.fine"}));
+        assertFalse(LauncherHingeService.ownsLauncher(new String[]{"com.example.duofold"}));
+        assertFalse(LauncherHingeService.ownsLauncher(new String[]{"com.example.duofold.fine.fake"}));
+    }
     @Test public void yieldsToEitherInteractiveFolduoService(){
         assertTrue(LauncherHingeService.available(false,false));
         assertFalse(LauncherHingeService.available(true,false));

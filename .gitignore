@@ -18,3 +18,5 @@ captures/
 *.log
 tools/cover-wallpaper-setup.jar
 __pycache__/
+# Pinned external shader; see THIRD_PARTY_NOTICES.md for retrieval and checksum.
+app/src/main/res/raw/duo_fold.agsl

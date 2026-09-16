@@ -1,3 +1,30 @@
+# Fold8 trial: external shader dependency
+
+The trial's GPU renderer uses `app/src/main/res/raw/duo_fold.agsl` from
+[kuris/foldtoduo](https://github.com/kuris/foldtoduo), pinned to commit
+`d501fdbdb0ecee000fea65d98fbcb17dcdc980d1`. The accepted build uses that file
+unchanged. Its header credits an AGSL port of
+`DuoLikeAnimation/Shaders/DuoFold.metal`; that attribution stays in the file.
+
+No license declaration was found in the pinned upstream repository. This shader
+is an external build input, excluded from this Git repository; the MIT license
+for Folduo does not relicense it. This source push does not include an APK.
+
+Before building this branch, retrieve the exact file from its original source:
+
+```sh
+mkdir -p app/src/main/res/raw
+curl --fail --location \
+  https://raw.githubusercontent.com/kuris/foldtoduo/d501fdbdb0ecee000fea65d98fbcb17dcdc980d1/app/src/main/res/raw/duo_fold.agsl \
+  --output app/src/main/res/raw/duo_fold.agsl
+echo '9021c564598bae27c3b511fd3dba3024648138227fa9d69f944da7544efec2eb  app/src/main/res/raw/duo_fold.agsl' | shasum -a 256 --check
+```
+
+Continue only when the checksum reports `OK`. Local screen captures, wallpapers,
+reference videos, signing keys, and device logs are also excluded from this push.
+
+---
+
 # 第三者のソフトウェアとライセンス
 
 この一覧はFolduoの依存関係を2026年9月13日に確認したものです。自作のアプリ・設定補助・文書はルートの[MITライセンス](LICENSE)に従います。第三者のコードの権利はそれぞれの著作権者に帰属します。依存ライブラリそのものは改変していません。

@@ -2,6 +2,9 @@ package jp.bunkaich.sukashimotion;
 
 /** Pure state machine. Direction hysteresis prevents tiny sensor jitter swapping screens. */
 final class FoldPolicy {
+    // Physical calibration: leave early blur visible, finish coverage before resizing.
+    static final float OUTER_FADE_START=45,OUTER_FADE_END=120;
+    static float outerDarkness(float angle){return Math.max(0,Math.min(1,(angle-OUTER_FADE_START)/(OUTER_FADE_END-OUTER_FADE_START)));}
     enum Change { NONE, OPEN, CLOSE, FINISH_OPEN, FINISH_CLOSED }
     boolean open,active;float extreme;long endpointSince=-1;
     FoldPolicy(boolean initiallyInner){open=initiallyInner;extreme=initiallyInner?180:0;}

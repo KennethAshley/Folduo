@@ -8,9 +8,11 @@ import android.view.View;
 final class SnapshotView extends View {
     final RuntimeShader shader=new RuntimeShader(FoldShader.CODE);final Paint paint=new Paint(Paint.FILTER_BITMAP_FLAG);
     FrameTexture frame;boolean inner;final boolean leftOnly;
-    int logicalWidth;boolean flatProjection; private float angle;private FrameTexture rearFrame;private long rearSince;private boolean sharpHold;
-    private float blurFloor,layoutBlend=-1;
+    int logicalWidth;boolean flatProjection,duoEffect; private float angle;private FrameTexture rearFrame;private long rearSince;private boolean sharpHold;
+    private float blurFloor,layoutBlend=-1,layoutMask;
+    private RenderNode layoutNode;
     private final Paint holdPaint=new Paint(Paint.FILTER_BITMAP_FLAG);
+    private DuoSnapshotRenderer duoRenderer;
     SnapshotView(Context context,FrameTexture frame,boolean inner,boolean leftOnly){
         super(context);this.frame=frame;this.inner=inner;this.leftOnly=leftOnly;angle=inner?180:0;paint.setShader(shader);
         setContentDescription(context.getString(R.string.snapshot_description));setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
@@ -35,8 +37,15 @@ final class SnapshotView extends View {
         shader.setFloatUniform("size",w,h);shader.setFloatUniform("inner",inner?1:0);
         shader.setFloatUniform("pixelsPerDp",getResources().getDisplayMetrics().density);shader.setFloatUniform("radiusDp",28);
     }
-    void setFrame(FrameTexture next){frame=next;bindTextures();invalidate();}
+    void setFrame(FrameTexture next){frame=next;if(duoEffect){rearFrame=null;layoutBlend=-1;}bindTextures();invalidate();}
     void setBlurFloor(float radius){blurFloor=Math.max(0,Math.min(60,radius));invalidate();}
+    void setLayoutMask(float amount){
+        float next=Math.max(0,Math.min(1,amount));if(layoutMask==next)return;layoutMask=next;
+        if(layoutNode==null)layoutNode=new RenderNode("destination preparation frost");
+        // Local visual calibration: conceal the temporary layout until the resized frame arrives.
+        float radius=48*getResources().getDisplayMetrics().density*layoutMask;
+        layoutNode.setRenderEffect(radius>0?RenderEffect.createBlurEffect(radius,radius,Shader.TileMode.CLAMP):null);invalidate();
+    }
     void setLayoutBlend(FrameTexture next,float progress){
         boolean changed=rearFrame!=next||layoutBlend<0;
         rearFrame=next;layoutBlend=Math.max(0,Math.min(1,progress));
@@ -56,7 +65,14 @@ final class SnapshotView extends View {
         if(Math.abs(angle-next)<.00001f)return;angle=next;invalidate();
     }
     @Override protected void onDraw(Canvas canvas){
-        if(sharpHold||!frame.prepared){canvas.drawColor(Color.BLACK);canvas.drawBitmap(frame.sharp,null,new Rect(0,0,getWidth(),getHeight()),holdPaint);return;}
+        if(sharpHold||!frame.prepared&&!duoEffect){canvas.drawColor(Color.BLACK);canvas.drawBitmap(frame.sharp,null,new Rect(0,0,getWidth(),getHeight()),holdPaint);return;}
+        if(duoEffect){
+            if(duoRenderer==null)duoRenderer=new DuoSnapshotRenderer(getContext(),inner);
+            Canvas target=canvas;
+            if(layoutMask>0){layoutNode.setPosition(0,0,getWidth(),getHeight());target=layoutNode.beginRecording();}
+            duoRenderer.draw(target,frame.sharp,layoutBlend>=0&&rearFrame!=null?rearFrame.sharp:null,layoutBlend,getWidth(),getHeight(),angle);
+            if(layoutMask>0){layoutNode.endRecording();canvas.drawRenderNode(layoutNode);}return;
+        }
         GlassProjection.Pose pose=GlassProjection.coverPose(angle);
         shader.setFloatUniform("pose",flatProjection?0:pose.expansion(),flatProjection?0:pose.taper());
         GlassProjection.Plane plane=GlassProjection.innerPlane(angle);

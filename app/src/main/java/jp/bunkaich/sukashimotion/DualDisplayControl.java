@@ -34,6 +34,7 @@ final class DualDisplayControl implements AutoCloseable {
     int id(Object info,String field)throws Exception {Object state=info.getClass().getField(field).get(info);return (int)state.getClass().getMethod("getIdentifier").invoke(state);}
     String describe()throws Exception{Object info=read.invoke(service);return "inner="+innerState+" / cover="+outerState+" / current="+id(info,"currentState")+" / base="+id(info,"baseState");}
     String baseName()throws Exception{Object info=read.invoke(service),state=info.getClass().getField("baseState").get(info);return (String)state.getClass().getMethod("getName").invoke(state);}
+    int currentState()throws Exception{return id(read.invoke(service),"currentState");}
     synchronized boolean isOwned(){return owned!=null;}
     synchronized void hold(boolean inner,int previousOwner)throws Exception{
         holdState(inner?innerState:outerState,previousOwner);

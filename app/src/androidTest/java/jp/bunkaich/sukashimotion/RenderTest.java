@@ -291,5 +291,78 @@ public class RenderTest {
   assertEquals(1,homes.size());
   assertEquals(HomeActivity.class.getName(),homes.get(0).activityInfo.name);
  }
+ @Test public void duoAppSnapshotKeepsEndpointsAndRightPaneSharpWithOppositeDepth()throws Exception{
+  Bitmap white=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);white.eraseColor(Color.WHITE);
+  Bitmap cover=render(false,90,white,null,false,false,v->v.duoEffect=true);
+  int near=Color.red(cover.getPixel(80,360)),far=Color.red(cover.getPixel(500,360));
+  assertTrue("Duo depth must shade progressively from the cover hinge: "+near+", "+far,near>far+30&&near<250&&near>150);
+  Bitmap inner=render(true,90,white,null,false,false,v->v.duoEffect=true);
+  assertTrue("Inner depth runs towards the left edge",Color.red(inner.getPixel(40,360))+30<Color.red(inner.getPixel(280,360)));
+  Bitmap pattern=PreviewActivity.sample(640,720);
+  Bitmap folded=render(true,90,pattern,null,false,false,v->v.duoEffect=true);
+  for(boolean inside:new boolean[]{false,true}){
+   Bitmap clear=render(inside,inside?180:0,pattern,null,false,false,v->v.duoEffect=true);
+   for(int y=10;y<710;y+=17)for(int x=10;x<630;x+=17){
+    assertTrue("Endpoint must reveal the actual app pixels",distance(pattern.getPixel(x,y),clear.getPixel(x,y))<=3);
+    if(inside&&x>325)assertEquals("Inner right half remains sharp",clear.getPixel(x,y),folded.getPixel(x,y));
+   }
+   clear.recycle();
+  }
+  cover.recycle();inner.recycle();folded.recycle();white.recycle();pattern.recycle();
+ }
+ @Test public void duoLayoutExchangeBlendsBothPanesWithoutChangingTheFoldEffect()throws Exception{
+  Bitmap old=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888),next=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);
+  old.eraseColor(Color.RED);next.eraseColor(Color.BLUE);FrameTexture destination=FrameTexture.prepare(next,1,()->false);
+  for(boolean inside:new boolean[]{false,true})for(float angle:new float[]{90,inside?180:0}){
+   Bitmap before=render(inside,angle,old,null,false,false,v->v.duoEffect=true);
+   Bitmap after=render(inside,angle,next,null,false,false,v->v.duoEffect=true);
+   for(float mix:new float[]{0,.5f,1}){
+    Bitmap result=render(inside,angle,old,null,false,false,v->{v.duoEffect=true;v.setLayoutBlend(destination,mix);});
+    for(int x:new int[]{80,280,480}){
+     int a=before.getPixel(x,360),b=after.getPixel(x,360),actual=result.getPixel(x,360);
+     assertEquals("Content fades without changing hinge shading",Color.red(a)*(1-mix)+Color.red(b)*mix,Color.red(actual),3);
+     assertEquals("The resized layout appears progressively",Color.blue(a)*(1-mix)+Color.blue(b)*mix,Color.blue(actual),3);
+     assertEquals("No transparent hole during the exchange",255,Color.alpha(actual));
+    }
+    result.recycle();
+   }
+   Bitmap committed=render(inside,angle,old,null,false,false,v->{v.duoEffect=true;v.setLayoutBlend(destination,.5f);v.setFrame(destination);});
+   assertEquals("Committing the new layout clears the old blend",after.getPixel(480,360),committed.getPixel(480,360));
+   committed.recycle();before.recycle();after.recycle();
+  }
+  old.recycle();next.recycle();
+ }
+ @Test public void duoHardwareFramesTransferAndRenderWithoutChangingPixels()throws Exception{
+  Bitmap source=PreviewActivity.sample(640,720),hardware=source.copy(Bitmap.Config.HARDWARE,false);
+  assertNotNull("Hardware capture available",hardware);
+  FrameTexture prepared=FrameTexture.prepare(source,1,()->false);
+  for(boolean inside:new boolean[]{false,true}){
+   FrameTexture expected=prepared.transfer(!inside,640,720);
+   FrameTexture direct=FrameTexture.sharp(hardware).transfer(!inside,640,720);
+   for(float angle:new float[]{90,inside?180:0}){
+    Bitmap before=render(inside,angle,source,null,false,false,v->{v.duoEffect=true;v.setFrame(expected);});
+    Bitmap after=render(inside,angle,source,null,false,false,v->{v.duoEffect=true;v.setFrame(direct);});
+    for(int x=0;x<640;x+=19)for(int y=0;y<720;y+=23)
+     assertTrue("Skipping unused CPU blur must preserve fold pixels",distance(before.getPixel(x,y),after.getPixel(x,y))<=3);
+    before.recycle();after.recycle();
+   }
+  }
+  hardware.recycle();source.recycle();
+ }
+ @Test public void pendingLayoutHidesReadablePlaceholderAndClearsWithoutChangingFoldPixels()throws Exception{
+  Bitmap stripes=Bitmap.createBitmap(640,720,Bitmap.Config.ARGB_8888);
+  for(int x=0;x<640;x++)for(int y=0;y<720;y++)stripes.setPixel(x,y,(x/12)%2==0?Color.WHITE:Color.BLACK);
+  for(boolean inside:new boolean[]{false,true})for(float angle:new float[]{90,inside?180:0}){
+   Bitmap normal=render(inside,angle,stripes,null,false,false,v->v.duoEffect=true);
+   Bitmap hidden=render(inside,angle,stripes,null,false,false,v->{v.duoEffect=true;v.setLayoutMask(1);});
+   int contrast=Math.abs(Color.red(hidden.getPixel(486,360))-Color.red(hidden.getPixel(498,360)));
+   assertTrue("The temporary layout must not expose readable sharp stripes: "+contrast,contrast<10);
+   for(int x:new int[]{0,80,320,639})for(int y:new int[]{0,360,719})assertEquals("Mask must remain opaque at edges",255,Color.alpha(hidden.getPixel(x,y)));
+   Bitmap cleared=render(inside,angle,stripes,null,false,false,v->{v.duoEffect=true;v.setLayoutMask(1);v.setLayoutMask(0);});
+   for(int x=0;x<640;x+=19)for(int y=0;y<720;y+=23)assertEquals("Clearing preparation frost preserves the existing fold",normal.getPixel(x,y),cleared.getPixel(x,y));
+   normal.recycle();hidden.recycle();cleared.recycle();
+  }
+  stripes.recycle();
+ }
  private int distance(int a,int b){return Math.abs(Color.red(a)-Color.red(b))+Math.abs(Color.green(a)-Color.green(b))+Math.abs(Color.blue(a)-Color.blue(b));}
 }

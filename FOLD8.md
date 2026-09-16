@@ -1,3 +1,60 @@
+# Fold8 experimental branch
+
+## Accepted build: v74 / 0.1.27-fold8.33
+
+Tested on Galaxy Z Fold8 SM-F971U, Android 17 / One UI 9.0, with Shizuku.
+The latest accepted result is the continuous Twitter trial in
+`TwitterFoldTrialTest.oneUserStartedPhysicalCycle`. It preserves the active app
+task, prepares the inner view under GPU frost, fades the cover with hinge movement
+before widening the app, and reveals the fresh portrait frame when closing.
+
+The trial keeps both panels available and uses custom navigation on the inner
+screen. It does not replace the selected launcher or saved wallpapers. Samsung's
+hardware hinge log supplies stepped angle readings; no stock wallpaper change is
+needed for that source on the tested phone. The normal app Enable button runs a
+separate older mode and does not start this trial.
+
+Closing reuses the opaque native cover while restoring the portrait app, avoiding
+a hidden placeholder and hidden layout blend. Three timing samples improved from
+663/714/715 ms to 680/629/632 ms; these are controlled stationary measurements,
+not a guarantee for every physical folding speed. The user accepted the result.
+
+Validation for v74: 53 JVM checks, eight device handoff checks, and a stationary
+Twitter round trip passed. Coverage includes reversals, interrupted cleanup,
+five repeated cycles, held angles, actual destination pixels, inner taps, and
+removal of the cover shade after stopping. The preceding GPU implementation also
+passed 26 rendering checks; the shader was unchanged for v74.
+
+This remains a development trial. Normal-speed smoothness, other apps, rotation,
+battery impact, and longer sessions need further testing. Protected captures are
+not supported. Test images remain in memory; diagnostic logs and user screenshots
+are not part of this repository.
+
+### Build and run the accepted trial
+
+Use JDK 17 or newer, Android SDK 37, Build Tools 36.0.0, and the Gradle wrapper.
+The exact shader dependency and its source are documented in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+```sh
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest
+adb -d install -r app/build/outputs/apk/debug/app-debug.apk
+adb -d install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb -d shell am instrument --no-hidden-api-checks -w -r \
+  -e folduoHardware true -e continuous true \
+  -e class jp.bunkaich.sukashimotion.TwitterFoldTrialTest#oneUserStartedPhysicalCycle \
+  jp.bunkaich.sukashimotion.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Have Shizuku running and grant Folduo overlay and notification access. Close and
+unlock the phone, tap **Start Twitter test**, and wait for Twitter before folding.
+The same session stays active across folds. Expand Folduo's notification and tap
+**Stop** to end it; locking or the ten-minute limit also ends the trial. Cleanup
+restores the original display size and releases the display request. The separate
+Home tests require the locally modified `com.example.duofold.fine` companion.
+
+## Earlier experiments
+
 ## v62 / 0.1.21-fold8.21: preserve cover detail until the final layout change — visual check pending
 
 The user confirms v61 clears after closing, but the outside looks like solid blur

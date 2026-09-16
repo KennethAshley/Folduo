@@ -88,7 +88,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         if(!paused)return;
         paused=false;++sessionSerial;layoutPrepared=layoutPreparing=layoutRecovering=false;blockedUntilEndpoint=false;rebuildPanels();Panel primary=panelById(0);fixedPrimaryInner=primary!=null&&primary.inner;policy=new FoldPolicy(fixedPrimaryInner);target=smoothed=Float.NaN;source=-1;measuredAt=lastFrame=0;status=UiText.of(R.string.preparing_connection);
     }
-    private void pause(){paused=true;++angleSession;cancelSession();removeAnchors();IShellBridge b=bound;bound=null;if(b!=null)controls.execute(()->{try{b.stopAngles();b.release();}catch(Exception ignored){}});status=UiText.of(R.string.waiting_unlock);}
+    private void pause(){paused=true;++angleSession;cancelSession();removeAnchors();IShellBridge b=bound;bound=null;if(b!=null)controls.execute(()->{try{BridgeConnection.stopAngles(MotionService.this,b);b.release();}catch(Exception ignored){}});status=UiText.of(R.string.waiting_unlock);}
     private final Runnable health=new Runnable(){public void run(){
         if(stopped)return;
         if(!paused&&!unlocked())pause();
@@ -97,7 +97,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         if(!paused)BridgeConnection.connect(MotionService.this);
         IShellBridge available=BridgeConnection.bridge;
         if(!paused&&bound!=available){
-            if(bound!=null){cancelSession();IShellBridge old=bound;controls.execute(()->{try{old.stopAngles();}catch(Exception ignored){}});recordRecovery(UiText.of(R.string.helper_recovery));}
+            if(bound!=null){cancelSession();IShellBridge old=bound;controls.execute(()->{try{BridgeConnection.stopAngles(MotionService.this,old);}catch(Exception ignored){}});recordRecovery(UiText.of(R.string.helper_recovery));}
             bound=available;++angleSession;source=-1;target=smoothed=Float.NaN;measuredAt=0;
             if(available!=null)startAngles(available);
         }
@@ -123,7 +123,7 @@ public final class MotionService extends Service implements DisplayManager.Displ
         IAngleSink sink=new IAngleSink.Stub(){public void angle(float value,long at,int kind){main.post(()->{if(session==angleSession&&bound==bridge)accept(value,at,kind);});}};
         // Serialize with pause/stop. Otherwise a late stopAngles from screen-off can
         // run AFTER wake-up's startAngles and silently leave a live binder with no sink.
-        controls.execute(()->{try{bridge.startAngles(sink);}catch(Exception e){main.post(()->{if(!stopped&&bound==bridge){recordRecovery(UiText.of(R.string.angle_start_failed));status=UiText.of(R.string.angle_retry_error,UiText.error(e));}});}});
+        controls.execute(()->{try{BridgeConnection.startAngles(MotionService.this,bridge,sink,true);}catch(Exception e){main.post(()->{if(!stopped&&bound==bridge){recordRecovery(UiText.of(R.string.angle_start_failed));status=UiText.of(R.string.angle_retry_error,UiText.error(e));}});}});
     }
     private void accept(float value,long at,int kind){
         if(stopped||paused||bound==null||!Float.isFinite(value)||at>SystemClock.elapsedRealtime()+50||SystemClock.elapsedRealtime()-at>600)return;
@@ -502,6 +502,6 @@ public final class MotionService extends Service implements DisplayManager.Displ
     @Override public void onDestroy(){
         stopped=true;running=false;status=UiText.of(R.string.stopped);main.removeCallbacksAndMessages(null);Choreographer.getInstance().removeFrameCallback(this);
         displays.unregisterDisplayListener(this);unregisterReceiver(power);cancelSession();removeAnchors();poller.shutdownNow();
-        IShellBridge bridge=bound;bound=null;controls.execute(()->{try{if(bridge!=null){bridge.stopAngles();bridge.release();}}catch(Exception ignored){}});jobs.shutdown();controls.shutdown();BridgeConnection.disconnect();super.onDestroy();
+        IShellBridge bridge=bound;bound=null;controls.execute(()->{try{if(bridge!=null){BridgeConnection.stopAngles(MotionService.this,bridge);bridge.release();}}catch(Exception ignored){}});jobs.shutdown();controls.shutdown();BridgeConnection.disconnect();super.onDestroy();
     }
 }

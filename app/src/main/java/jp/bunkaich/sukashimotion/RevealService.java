@@ -85,9 +85,9 @@ public final class RevealService extends Service implements DisplayManager.Displ
                 // Arm from the current native panel; no animation starts until a fresh angle arrives.
                 Display display=displays.getDisplay(0);if(display!=null)hinge.update(isInner(display)?180:0);
                 if(next!=null)BridgeConnection.work.execute(()->{
-                    try{next.startAngles(new IAngleSink.Stub(){public void angle(float value,long at,int source){
+                    try{BridgeConnection.startAngles(RevealService.this,next,new IAngleSink.Stub(){public void angle(float value,long at,int source){
                         main.post(()->onHinge(next,value,at,source));
-                    }});}catch(Exception e){main.post(()->{if(bound==next){lastError=ShellBridge.message(e);detachBridge();}});}
+                    }},true);}catch(Exception e){main.post(()->{if(bound==next){lastError=ShellBridge.message(e);detachBridge();}});}
                 });
             }
             if(motion&&SystemClock.uptimeMillis()-startedAt>=MAX_HOLD_MS)fail("Fold exceeded 30 seconds");
@@ -99,7 +99,7 @@ public final class RevealService extends Service implements DisplayManager.Displ
     private void detachBridge(){
         IShellBridge previous=bound;bound=null;hinge.reset();hardwareAt=0;
         if(previous==null)return;cancelEffect("bridge-detached");
-        BridgeConnection.work.execute(()->{try{previous.release();previous.stopAngles();}catch(Exception ignored){}});
+        BridgeConnection.work.execute(()->{try{previous.release();}catch(Exception ignored){}try{BridgeConnection.stopAngles(RevealService.this,previous);}catch(Exception ignored){}});
     }
     private void onHinge(IShellBridge sender,float value,long at,int source){
         long age=SystemClock.elapsedRealtime()-at;
